@@ -25,7 +25,6 @@
 
 %% API
 -export([start_link/0,
-         run/0,
          take_measurement/1]).
 
 %% gen_server callbacks
@@ -46,9 +45,6 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-run() ->
-    gen_server:cast(?MODULE, run).
-
 take_measurement(Measurement) ->
     gen_server:call(?MODULE, {take_measurement, Measurement}, infinity).
 
@@ -64,15 +60,12 @@ init([]) ->
             State = #state {
               driver = Driver,
               driver_state = DriverState },
-            {ok, State};
+            {ok, restart_measurements(State)};
         Error ->
             ?FAIL_MSG("Failed to initialize driver ~p: ~p\n", [Driver, Error]),
             {stop, Error}
     end.
 
-handle_call(run, _From, State) ->
-    NewState = restart_measurements(State),
-    {reply, ok, NewState};
 handle_call({take_measurement, Measurement}, _From, State) ->
     Driver = State#state.driver,
     DriverState = State#state.driver_state,
@@ -111,9 +104,8 @@ handle_call({take_measurement, Measurement}, _From, State) ->
     end.
 
 
-handle_cast(run, State) ->
-    NewState = restart_measurements(State),
-    {noreply, NewState}.
+handle_cast(_Msg, State) ->
+    {noreply, State}.
 
 handle_info(Msg, State) ->
     io:format("[~s:~p] DEBUG - Msg: ~p~n", [?MODULE, ?LINE, Msg]),
