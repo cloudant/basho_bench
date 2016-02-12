@@ -26,7 +26,6 @@
 %% API
 -export([start_link/0,
          exponential/1,
-         run/0,
          op_complete/3]).
 
 %% gen_server callbacks
@@ -53,9 +52,6 @@ start_link() ->
 
 exponential(Lambda) ->
     -math:log(random:uniform()) / Lambda.
-
-run() ->
-    gen_server:call({global, ?MODULE}, run).
 
 op_complete(Op, ok, ElapsedUs) ->
     op_complete(Op, {ok, 1}, ElapsedUs);
@@ -127,16 +123,16 @@ init([]) ->
     %% Schedule next write/reset of data
     ReportInterval = timer:seconds(basho_bench_config:get(report_interval)),
 
+    Now = os:timestamp(),
+    timer:send_interval(ReportInterval, report),
+
     {ok, #state{ ops = Ops ++ Measurements,
                  report_interval = ReportInterval,
                  stats_writer = StatsSinkModule,
-                 stats_writer_data = StatsSinkModule:new(Ops, Measurements)}}.
+                 stats_writer_data = StatsSinkModule:new(Ops, Measurements),
+                 start_time = Now,
+                 last_write_time = Now}}.
 
-handle_call(run, _From, State) ->
-    %% Schedule next report
-    Now = os:timestamp(),
-    timer:send_interval(State#state.report_interval, report),
-    {reply, ok, State#state { start_time = Now, last_write_time = Now}};
 handle_call({op, Op, {error, Reason}, _ElapsedUs}, _From, State) ->
     increment_error_counter(Op),
     increment_error_counter({Op, Reason}),
