@@ -21,12 +21,17 @@
 %% -------------------------------------------------------------------
 -module(basho_bench).
 
--export([main/1, md5/1]).
+-export([run_benchmark/0, main/1, md5/1]).
 -include("basho_bench.hrl").
 
 %% ====================================================================
 %% API
 %% ====================================================================
+
+run_benchmark() ->
+    application:set_env(basho_bench_app, is_running, true),
+    basho_bench_sup:start_child(),
+    ok = basho_bench_worker:run(basho_bench_worker_sup:workers()).
 
 cli_options() ->
     [
@@ -52,12 +57,9 @@ main(Args) ->
         {error, {already_loaded, basho_bench}} -> ok
     end,
     register(basho_bench, self()),
-    %% TODO: Move into a proper supervision tree, janky for now
-    {ok, _Pid} = basho_bench_config:start_link(),
-    basho_bench_config:set(test_id, BenchName),
 
     application:load(lager),
-    ConsoleLagerLevel = basho_bench_config:get(log_level, debug),
+    ConsoleLagerLevel = application:get_env(log_level, debug),
     ErrorLog = filename:join([TestDir, "error.log"]),
     ConsoleLog = filename:join([TestDir, "console.log"]),
     CrashLog = filename:join([TestDir, "crash.log"]),
@@ -70,7 +72,10 @@ main(Args) ->
     application:set_env(lager, crash_log, CrashLog),
     lager:start(),
 
-    application:ensure_all_started(couch),
+    {ok, _} = application:ensure_all_started(couch),
+
+    ok = basho_bench_app:start(),
+    basho_bench_config:set(test_id, BenchName),
 
     %% Make sure this happens after starting lager or failures wont
     %% show.
@@ -104,17 +109,12 @@ main(Args) ->
     ok = file:set_cwd(TestDir),
     log_dimensions(),
 
-    %% Run pre_hook for user code preconditions
-    run_pre_hook(),
-    %% Spin up the application
-    ok = basho_bench_app:start(),
-
-    %% Pull the runtime duration from the config and sleep until that's passed OR
-    %% the supervisor process exits
-    Mref = erlang:monitor(process, whereis(basho_bench_sup)),
-    DurationMins = basho_bench_config:get(duration),
-    wait_for_stop(Mref, DurationMins).
-
+    run_benchmark(),
+    MRef = erlang:monitor(process, whereis(basho_bench_run_sup)),
+    receive
+        {'DOWN', MRef, process, _Object, _Info} ->
+            ok
+    end.
 
 %% ====================================================================
 %% Internal functions
@@ -182,30 +182,6 @@ test_dir(Opts, Name) ->
     [] = os:cmd(?FMT("rm -f ~s; ln -sf ~s ~s", [Link, TestDir, Link])),
     TestDir.
 
-wait_for_stop(Mref, infinity) ->
-    receive
-        {'DOWN', Mref, _, _, Info} ->
-            run_post_hook(),
-            ?CONSOLE("Test stopped: ~p\n", [Info])
-    end;
-wait_for_stop(Mref, DurationMins) ->
-    Duration = timer:minutes(DurationMins) + timer:seconds(1),
-    receive
-        {'DOWN', Mref, _, _, Info} ->
-            run_post_hook(),
-            ?CONSOLE("Test stopped: ~p\n", [Info]);
-        {shutdown, Reason, Exit} ->
-            run_post_hook(),
-            basho_bench_app:stop(),
-            ?CONSOLE("Test shutdown: ~s~n", [Reason]),
-            halt(Exit)
-
-    after Duration ->
-            run_post_hook(),
-            basho_bench_app:stop(),
-            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins])
-    end.
-
 %%
 %% Construct a string suitable for use as a unique ID for this test run
 %%
@@ -269,18 +245,6 @@ load_source_files(Dir) ->
                         end
                 end,
     filelib:fold_files(Dir, ".*.erl", false, CompileFn, ok).
-
-run_pre_hook() ->
-    run_hook(basho_bench_config:get(pre_hook, no_op)).
-
-run_post_hook() ->
-    run_hook(basho_bench_config:get(post_hook, no_op)).
-
-run_hook({Module, Function}) ->
-    Module:Function();
-
-run_hook(no_op) ->
-    no_op.
 
 get_addr_args() ->
     {ok, IfAddrs} = inet:getifaddrs(),
