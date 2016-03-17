@@ -90,7 +90,7 @@ stop(Pids) ->
 
 init([SupChild, Id]) ->
     %% If workers are being used, WorkerType will be set to next needed type
-    %% and LocalConfig will be set from the associated config in worker_typesa
+    %% and LocalConfig will be set from the associated config in worker_types
     WorkerType = basho_bench_config:next_worker(),
     ?DEBUG("init ID ~p WorkerType=~p~n", [Id, WorkerType]),
     LocalConfig =
@@ -101,7 +101,7 @@ init([SupChild, Id]) ->
                 % TODO: Improve error reporting,
                 %    but with no worker_types or specific worker defined should complain
                 WorkerTypes = basho_bench_config:get(worker_types),
-                config_get(WorkerType, WorkerTypes)
+                lookup_value(WorkerType, WorkerTypes)
         end,
 
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
@@ -320,13 +320,17 @@ worker_next_op2(State, OpTag) ->
 
 worker_next_op(State) ->
     Next = element(random:uniform(State#state.ops_len), State#state.ops),
-    {_Label, OpTag} = Next,
+    {Label, OpTag} = Next,
     Start = os:timestamp(),
     Result = worker_next_op2(State, OpTag),
     ElapsedUs = erlang:max(0, timer:now_diff(os:timestamp(), Start)),
+
+    %%TODO: May WORK but ugly/horrible way to apply worker_type name so revisit
+    OpName = { basho_bench_stats:worker_op_name(State#state.worker_type, Label),
+               basho_bench_stats:worker_op_name(State#state.worker_type, OpTag)},
     case Result of
         {Res, DriverState} when Res == ok orelse element(1, Res) == ok ->
-            basho_bench_stats:op_complete(Next, Res, ElapsedUs),
+            basho_bench_stats:op_complete(OpName, Res, ElapsedUs),
             {ok, State#state { driver_state = DriverState}};
 
         {Res, DriverState} when Res == silent orelse element(1, Res) == silent ->
@@ -334,12 +338,12 @@ worker_next_op(State) ->
 
         {ok, ElapsedT, DriverState} ->
             %% time is measured by external system
-            basho_bench_stats:op_complete(Next, ok, ElapsedT),
+            basho_bench_stats:op_complete(OpName, ok, ElapsedT),
             {ok, State#state { driver_state = DriverState}};
 
         {error, Reason, DriverState} ->
             %% Driver encountered a recoverable error
-            basho_bench_stats:op_complete(Next, {error, Reason}, ElapsedUs),
+            basho_bench_stats:op_complete(OpName, {error, Reason}, ElapsedUs),
             State#state.shutdown_on_error andalso
                 erlang:send_after(500, basho_bench,
                                   {shutdown, "Shutdown on errors requested", 1}),
@@ -348,7 +352,7 @@ worker_next_op(State) ->
         {'EXIT', Reason} ->
             %% Driver crashed, generate a crash error and terminate. This will take down
             %% the corresponding worker which will get restarted by the appropriate supervisor.
-            basho_bench_stats:op_complete(Next, {error, crash}, ElapsedUs),
+            basho_bench_stats:op_complete(OpName, {error, crash}, ElapsedUs),
 
             %% Give the driver a chance to cleanup
             (catch (State#state.driver):terminate({'EXIT', Reason}, State#state.driver_state)),
