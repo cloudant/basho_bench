@@ -27,7 +27,10 @@
 -export([start_link/2,
          start_link_local/2,
          run/1,
-         stop/1]).
+         stop/1,
+         config_get/2, config_get/3,
+         lookup_value/2
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -42,6 +45,8 @@
                  driver,
                  driver_state,
                  api_pass_state,
+                 worker_type,
+                 local_config,
                  shutdown_on_error,
                  ops,
                  ops_len,
@@ -57,10 +62,10 @@
 %% ====================================================================
 
 start_link(SupChild, Id) ->
-    case basho_bench_config:get(distribute_work, false) of 
-        true -> 
+    case basho_bench_config:get(distribute_work, false) of
+        true ->
             start_link_distributed(SupChild, Id);
-        false -> 
+        false ->
             start_link_local(SupChild, Id)
     end.
 
@@ -84,6 +89,21 @@ stop(Pids) ->
 %% ====================================================================
 
 init([SupChild, Id]) ->
+    %% If workers are being used, WorkerType will be set to next needed type
+    %% and LocalConfig will be set from the associated config in worker_typesa
+    WorkerType = basho_bench_config:next_worker(),
+    ?DEBUG("init ID ~p WorkerType=~p~n", [Id, WorkerType]),
+    LocalConfig =
+        case WorkerType of
+            no_workers ->
+                [];
+            _ ->
+                % TODO: Improve error reporting,
+                %    but with no worker_types or specific worker defined should complain
+                WorkerTypes = basho_bench_config:get(worker_types),
+                config_get(WorkerType, WorkerTypes)
+        end,
+
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
     %% the worker to ensure consistency in load-gen
     %%
@@ -94,7 +114,7 @@ init([SupChild, Id]) ->
     %% and value size generation between test runs.
     process_flag(trap_exit, true),
     {A1, A2, A3} =
-        case basho_bench_config:get(rng_seed, {42, 23, 12}) of
+        case config_get(rng_seed, {42, 23, 12}, LocalConfig) of
             {Aa, Ab, Ac} -> {Aa, Ab, Ac};
             now -> now()
         end,
@@ -102,15 +122,23 @@ init([SupChild, Id]) ->
     RngSeed = {A1+Id, A2+Id, A3+Id},
 
     %% Pull all config settings from environment
-    Driver  = basho_bench_config:get(driver),
-    Ops     = ops_tuple(),
-    ShutdownOnError = basho_bench_config:get(shutdown_on_error, false),
+    Driver  = config_get(driver, LocalConfig),
+    Operations = config_get(operations, LocalConfig),
+    Ops     = ops_tuple(Operations),
+    ShutdownOnError = config_get(shutdown_on_error, false, LocalConfig),
+
+    %% Finally, initialize key and value generation. We pass in our ID to the
+    %% initialization to enable (optional) key/value space partitioning
+    KeyGen = basho_bench_keygen:new(config_get(key_generator, LocalConfig), Id),
+    ValGen = basho_bench_valgen:new(config_get(value_generator, LocalConfig), Id),
 
     %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
 
-    State0 = #state { id = Id, 
+    State0 = #state { id = Id,
                      api_pass_state = basho_bench_config:get(api_pass_state),
                      driver = Driver,
+                     local_config = LocalConfig,
+                     worker_type = WorkerType,
                      shutdown_on_error = ShutdownOnError,
                      ops = Ops, ops_len = size(Ops),
                      rng_seed = RngSeed,
@@ -180,7 +208,49 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% ====================================================================
+%% Additional Exported Functions
+%% ====================================================================
 
+%% get works with either LocalConfig list or #state.local_config in provided State
+%% if value is not found in LocalConfig list then basho_bench_config:get is called
+%% if no value is found and no default is provided, returns an error
+
+config_get(Key, #state{local_config=LocalConfig}) ->
+    config_get(Key, LocalConfig);
+config_get(Key, LocalConfig) ->
+    Value=lookup_value(Key, LocalConfig),
+    case Value of
+        undefined ->
+            V = basho_bench_config:get(Key),
+            V;
+        _ ->
+            Value
+    end.
+
+config_get(Key, Default, #state{local_config=LocalConfig}) ->
+   config_get(Key, Default, LocalConfig);
+config_get(Key, Default, LocalConfig) ->
+    Value=lookup_value(Key, LocalConfig),
+    case Value of
+        undefined ->
+            basho_bench_config:get(Key,Default);
+        _ ->
+            Value
+    end.
+
+%% lookup_value finds a given {Key,Value} pair in a provided list or returns undefined
+lookup_value(_Key, []) ->
+    undefined;
+lookup_value(Key, LocalConfig) ->
+    [Term|Tail] = LocalConfig,
+    {K,V} = Term,
+    case K =:= Key of
+        true ->
+            V;
+        _ ->
+            lookup_value(Key,Tail)
+    end.
 
 %% ====================================================================
 %% Internal functions
@@ -189,14 +259,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%
 %% Expand operations list into tuple suitable for weighted, random draw
 %%
-ops_tuple() ->
+ops_tuple(Operations) ->
     F =
         fun({OpTag, Count}) ->
                 lists:duplicate(Count, {OpTag, OpTag});
            ({Label, OpTag, Count}) ->
                 lists:duplicate(Count, {Label, OpTag})
         end,
-    Ops = [F(X) || X <- basho_bench_config:get(operations, [])],
+    Ops = [F(X) || X <- Operations],
     list_to_tuple(lists:flatten(Ops)).
 
 
@@ -212,11 +282,11 @@ worker_idle_loop(State) ->
     receive
         {init_driver, Caller} ->
             %% Spin up the driver implementation, optionally support new approach of passing State
-            DriverNew = case State#state.api_pass_state of 
+            DriverNew = case State#state.api_pass_state of
                     false -> catch(Driver:new(State#state.id));
                      _ -> catch(Driver:new(State#state.id, State))
                 end,
-            case DriverNew of 
+            case DriverNew of
                 {ok, DriverState} ->
                     Caller ! driver_ready,
                     ok;
@@ -227,7 +297,7 @@ worker_idle_loop(State) ->
             end,
             worker_idle_loop(State#state { driver_state = DriverState });
         run ->
-            case basho_bench_config:get(mode) of
+            case config_get(mode, State) of
                 max ->
                     ?INFO("Starting max worker: ~p on ~p~n", [self(), node()]),
                     max_worker_run_loop(State);
@@ -351,6 +421,9 @@ rate_worker_run_loop(State, Lambda) ->
             exit(ExitReason)
     end.
 
+%% TODO: Not sure what add_generators does or how it might need to be changed
+%% but it may overlap/conflict with the multi-worker approach
+
 add_generators(#state{api_pass_state = ApiPassState,id=Id}=State) ->
     KeyGen = init_generators(ApiPassState, basho_bench_config:get(key_generator), Id, basho_bench_keygen),
     ValGen = init_generators(ApiPassState, basho_bench_config:get(value_generator), Id, basho_bench_valgen),
@@ -370,4 +443,3 @@ get_keygen(Name, State) ->
 
 get_valgen(Name, State) ->
     proplists:get_value(Name, State#state.valgen).
-
