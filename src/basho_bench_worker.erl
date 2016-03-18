@@ -28,8 +28,8 @@
          start_link_local/2,
          run/1,
          stop/1,
-         config_get/2, config_get/3,
-         lookup_value/2
+         config_get/1, config_get/2, config_get/3,
+         lookup_value/2, lookup_value/3
 ]).
 
 %% gen_server callbacks
@@ -50,6 +50,7 @@
                  shutdown_on_error,
                  ops,
                  ops_len,
+                 ops_configs,
                  rng_seed,
                  parent_pid,
                  worker_pid,
@@ -132,14 +133,18 @@ init([SupChild, Id]) ->
     KeyGen = basho_bench_keygen:new(config_get(key_generator, LocalConfig), Id),
     ValGen = basho_bench_valgen:new(config_get(value_generator, LocalConfig), Id),
 
+    OptionsConfigs = ops_configs(Id, Operations),
     %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
     State0 = #state { id = Id,
                      api_pass_state = basho_bench_config:get(api_pass_state),
+                     keygen = KeyGen,
+                     valgen = ValGen,
                      driver = Driver,
                      local_config = LocalConfig,
                      worker_type = WorkerType,
                      shutdown_on_error = ShutdownOnError,
                      ops = Ops, ops_len = size(Ops),
+                     ops_configs = OptionsConfigs,
                      rng_seed = RngSeed,
                      parent_pid = self(),
                      sup_id = SupChild},
@@ -215,22 +220,23 @@ code_change(_OldVsn, State, _Extra) ->
 %% if value is not found in LocalConfig list then basho_bench_config:get is called
 %% if no value is found and no default is provided, returns an error
 
+config_get(Key) ->
+    config_get(Key, undefined, []).
+
 config_get(Key, #state{local_config=LocalConfig}) ->
-    config_get(Key, LocalConfig);
+    config_get(Key, undefined, LocalConfig);
 config_get(Key, LocalConfig) ->
-    Value=lookup_value(Key, LocalConfig),
-    case Value of
-        undefined ->
-            V = basho_bench_config:get(Key),
-            V;
-        _ ->
-            Value
-    end.
+    config_get(Key, undefined, LocalConfig).
 
 config_get(Key, Default, #state{local_config=LocalConfig}) ->
    config_get(Key, Default, LocalConfig);
 config_get(Key, Default, LocalConfig) ->
-    Value=lookup_value(Key, LocalConfig),
+    Value =
+        case V = erlang:get(Key) of
+            undefined ->
+                lookup_value(Key, LocalConfig);
+            _ -> V
+        end,
     case Value of
         undefined ->
             basho_bench_config:get(Key,Default);
@@ -239,10 +245,19 @@ config_get(Key, Default, LocalConfig) ->
     end.
 
 %% lookup_value finds a given {Key,Value} pair in a provided list or returns undefined
+lookup_value(Key, Default, LocalConfig) ->
+    case Value = lookup_value(Key, LocalConfig) of
+        undefined ->
+            Default;
+         _ ->
+            Value
+    end.
+
+lookup_value(_Key, undefined) ->
+    undefined;
 lookup_value(_Key, []) ->
     undefined;
-lookup_value(Key, LocalConfig) ->
-    [Term|Tail] = LocalConfig,
+lookup_value(Key, [Term | Tail]) ->
     {K,V} = Term,
     case K =:= Key of
         true ->
@@ -250,6 +265,13 @@ lookup_value(Key, LocalConfig) ->
         _ ->
             lookup_value(Key,Tail)
     end.
+
+publish_config([]) ->
+    ok;
+publish_config([{Key,Value} | RestConfig]) ->
+    erlang:put(Key,Value),
+    publish_config(RestConfig).
+
 
 %% ====================================================================
 %% Internal functions
@@ -263,16 +285,45 @@ ops_tuple(Operations) ->
         fun({OpTag, Count}) ->
                 lists:duplicate(Count, {OpTag, OpTag});
            ({Label, OpTag, Count}) ->
+                lists:duplicate(Count, {Label, OpTag});
+           ({Label, OpTag, Count, _OptionsList}) ->
                 lists:duplicate(Count, {Label, OpTag})
         end,
     Ops = [F(X) || X <- Operations],
     list_to_tuple(lists:flatten(Ops)).
 
+%%
+%% Expand operations list into initialized operations configuration information where used
+%%
+
+ops_configs(Id, Operations) ->
+    ops_configs(Id, Operations, []).
+
+%% Process individual operation entries in Operations list
+ops_configs(_Id, [], ACC) ->
+    ACC;
+ops_configs(Id, [{_Label, OpTag, _Count, OptionsList}|RestOps], ACC) ->
+    ops_configs(Id, RestOps, [ {OpTag, ops_configs_list(Id, OptionsList, [])} | ACC]);
+ops_configs(Id, [_Op|RestOps], ACC) ->
+    ops_configs(Id, RestOps, ACC).
+
+% Process individual config parameter entries within an Operations OptionsList
+ops_configs_list(_Id, [], ACC) ->
+    ACC;
+% Treat keygen and valuegen specially, converting keygen/valgen specification into actual object for later use
+ops_configs_list(Id, [{key_generator, KeyGenOption} | RestOptions], ACC) ->
+    ops_configs_list(Id, RestOptions, [ {keygen, basho_bench_keygen:new(KeyGenOption, Id)} | ACC]);
+ops_configs_list(Id, [{value_generator, ValGenOption} | RestOptions], ACC) ->
+    ops_configs_list(Id, RestOptions, [ {valgen, basho_bench_valgen:new(ValGenOption, Id)} | ACC]);
+% Allow remaining options to pass through
+ops_configs_list(Id, [KeyValuePair | RestOptions], ACC) ->
+    ops_configs(Id, RestOptions, [ KeyValuePair | ACC]).
 
 worker_init(State) ->
     %% Trap exits from linked parent process; use this to ensure the driver
     %% gets a chance to cleanup
     process_flag(trap_exit, true),
+    publish_config(State#state.local_config),
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
 
@@ -315,7 +366,11 @@ worker_idle_loop(State) ->
 worker_next_op2(#state{api_pass_state=false}=State, OpTag) ->
     catch (State#state.driver):run(OpTag, State#state.keygen, State#state.valgen,State#state.driver_state);
 worker_next_op2(State, OpTag) ->
-   catch (State#state.driver):run(OpTag, State#state.driver_state, State).
+   OpConfig = lookup_value(OpTag, State#state.ops_configs),
+   KeyGen = lookup_value(keygen, State#state.keygen, OpConfig),
+   ValueGen = lookup_value(valuegen, State#state.valgen, OpConfig),
+   catch (State#state.driver):run(OpTag, KeyGen, ValueGen,
+                                  State#state.driver_state).
 
 worker_next_op(State) ->
     Next = element(random:uniform(State#state.ops_len), State#state.ops),
