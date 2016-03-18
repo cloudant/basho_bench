@@ -333,7 +333,8 @@ get_active_ops() ->
        [] -> 
            F1 =
                fun({OpTag, _Count}) -> {OpTag, OpTag};
-                  ({Label, OpTag, _Count}) -> {Label, OpTag}
+                  ({Label, OpTag, _Count}) -> {Label, OpTag};
+                  ({Label, OpTag, _Count, _OptionsList}) -> {Label, OpTag}
                end,
            [F1(X) || X <- basho_bench_config:get(operations, [])];
 
@@ -356,6 +357,8 @@ get_worker_ops(Workers, WorkerTypes, ACC) ->
         fun({OpTag, _Count2}) -> 
                 { worker_op_name(WorkerType,OpTag), worker_op_name(WorkerType,OpTag)};
            ({Label, OpTag, _Count2}) -> 
+                { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)};
+           ({Label, OpTag, __ount, _OptionsList}) -> 
                 { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)}
         end,
      Ops = [F1(X) || X <- WorkerOps],
