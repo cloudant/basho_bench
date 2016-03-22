@@ -27,6 +27,8 @@
 -export([start_link/0,
          exponential/1,
          run/0,
+         get_active_ops/0,
+         worker_op_name/2,
          op_complete/3]).
 
 %% gen_server callbacks
@@ -94,11 +96,7 @@ init([]) ->
     ets:new(basho_bench_total_errors, [protected, named_table]),
 
     %% Get the list of operations we'll be using for this test
-    F1 =
-        fun({OpTag, _Count}) -> {OpTag, OpTag};
-           ({Label, OpTag, _Count}) -> {Label, OpTag}
-        end,
-    Ops = [F1(X) || X <- basho_bench_config:get(operations, [])],
+    Ops = get_active_ops(),
 
     %% Get the list of measurements we'll be using for this test
     F2 =
@@ -318,3 +316,59 @@ consume_report_msgs() ->
 normalize_name(StatsSink) when is_atom(StatsSink) ->
     {ok, list_to_atom("basho_bench_stats_writer_" ++ atom_to_list(StatsSink))};
 normalize_name(StatsSink) -> {error, {StatsSink, invalid_name}}.
+
+
+% Build up the list of operations taking into account the user of worker groups
+% If workers are not used, use the global operations list
+% If workers are being used, use worker_type as an operation prefix, 
+%    using either global or per-worker operations depending on the situation. 
+%
+% TODO: Think about checking for 0-counts to make it easier to reconfig runs
+% TODO: Understand how undocumented Labels are being used
+
+get_active_ops() ->
+   Workers = basho_bench_config:get(workers, []),
+   case Workers of 
+       %% No workers reverts to original case is fine as long as we stick with 2-tuples
+       [] -> 
+           F1 =
+               fun({OpTag, _Count}) -> {OpTag, OpTag};
+                  ({Label, OpTag, _Count}) -> {Label, OpTag};
+                  ({Label, OpTag, _Count, _OptionsList}) -> {Label, OpTag}
+               end,
+           [F1(X) || X <- basho_bench_config:get(operations, [])];
+
+        _ -> 
+           get_worker_ops(Workers, basho_bench_config:get(worker_types), [])
+    end.
+
+get_worker_ops([],_WorkerTypes, ACC) ->
+     ACC;
+get_worker_ops(Workers, WorkerTypes, ACC) ->
+     [ WorkerEntry | RestWorkers ] = Workers,
+     {WorkerType, _Count} = WorkerEntry,
+     WorkerConfig = basho_bench_worker:config_get(WorkerType, WorkerTypes),
+     %% Get either per-worker ops or global ops
+     WorkerOps = basho_bench_worker:config_get(operations, WorkerConfig), 
+
+     %%TODO: Not sure why the 2-tuples are needed here but they are 
+     %%TODO: Not sure about how Label is intended for use either
+     F1 =
+        fun({OpTag, _Count2}) -> 
+                { worker_op_name(WorkerType,OpTag), worker_op_name(WorkerType,OpTag)};
+           ({Label, OpTag, _Count2}) -> 
+                { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)};
+           ({Label, OpTag, __ount, _OptionsList}) -> 
+                { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)}
+        end,
+     Ops = [F1(X) || X <- WorkerOps],
+     get_worker_ops(RestWorkers, WorkerTypes, ACC++Ops).
+
+%% QUESTION: Generating atoms is not ideal - better way to handle this ? Needed for stats output too
+worker_op_name(Worker,Op) ->
+    Sep="_",
+    case Worker of 
+        no_workers -> Op;
+        _ ->
+            list_to_atom(atom_to_list(Worker)++Sep++atom_to_list(Op))
+    end.
