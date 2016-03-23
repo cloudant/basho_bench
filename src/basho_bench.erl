@@ -23,7 +23,15 @@
 
 -export([start/0]).
 
--export([setup_benchmark/1, run_benchmark/1, await_completion/1, main/1, md5/1, get_test_dir/0]).
+-export([
+    setup_benchmark/1,
+    run_benchmark/1,
+    await_completion/1,
+    main/1,
+    md5/1,
+    get_test_dir/0
+]).
+
 -include("basho_bench.hrl").
 
 
