@@ -97,7 +97,7 @@ run_benchmark(Configs) ->
     ok = basho_bench_stats:run(),
     ok = basho_bench_measurement:run(),
     ok = basho_bench_worker:run(basho_bench_worker_sup:workers()),
-    ok = basho_bench_duration:run(),
+    ok = basho_bench_terminator:run(),
     application:set_env(basho_bench_app, is_running, true).
 
 
@@ -123,7 +123,8 @@ main(Args) ->
 
 
 await_completion(Timeout) ->
-    MRef = erlang:monitor(process, whereis(basho_bench_duration)),
+    MRef = erlang:monitor(process, whereis(basho_bench_terminator)),
+
     receive
         {'DOWN', MRef, process, _Object, _Info} ->
             done

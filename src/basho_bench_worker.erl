@@ -162,6 +162,9 @@ handle_info({'EXIT', Pid, Reason}, State) ->
     #state{worker_pid=WorkerPid} = State,
     case {Reason, Pid} of
         {normal, _} ->
+            %% Worker process exited normally
+            %% Stop this worker and check is there any other alive worker
+            basho_bench_terminator:worker_stopping(WorkerPid),
             {stop, normal, State};
         {_, WorkerPid} ->
             ?ERROR("Worker ~p exited with ~p~n", [Pid, Reason]),

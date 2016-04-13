@@ -5,14 +5,14 @@
 ** basho_bench: main entry point
 *** setup_benchmark: common initialization - logging, basic conditions, environment
 *** run_benchmark: more init, load config, have basho_bench_sup start basho_bench_run_sup+children, send all run() msgs
-*** await_completion: monitors basho_bench_duration to finish, changes is_running mode
+*** await_completion: monitors basho_bench_terminator to finish, changes is_running mode
 *** main: wrapper for handling command line args, setup/run_benchmark
 *** load_source_files: compiles and loads driver contents of source_dir
 *** setup_distributed_work, deploy_module, distribute_app: distribute run across remote nodes
 ** ------- Intermediate Supervisors/Servers -----
 ** basho_bench_sup (supervisor): supervises basho_bench_run_sup and basho_bench_config
-** basho_bench_run_sup (supervisor): supervises basho_bench_duration/_stats/_measurement/_worker_sup
-** basho_bench_duration (gen_server): manages overall run time
+** basho_bench_run_sup (supervisor): supervises basho_bench_terminator/_stats/_measurement/_worker_sup
+** basho_bench_terminator (gen_server): manages overall run time
 *** init: calls prehook when there is one
 *** handle(run): initializes timing information then calls maybe_end to loop until it's time to terminate
 *** terminate: stop basho_bench_worker_sup, call posthook, stop basho_bench_run_sup, mark app as stopped

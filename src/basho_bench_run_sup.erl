@@ -20,7 +20,7 @@ init([]) ->
         _Driver -> [?CHILD(basho_bench_measurement, worker, Timeout)]
     end,
     Spec = [
-        ?CHILD(basho_bench_duration, worker, Timeout),
+        ?CHILD(basho_bench_terminator, worker, Timeout),
         ?CHILD(basho_bench_stats, worker, Timeout),
         ?CHILD(basho_bench_worker_sup, supervisor, Timeout)
     ] ++ MeasurementDriver,
