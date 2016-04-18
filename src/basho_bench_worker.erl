@@ -33,11 +33,15 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+%% State accessors
+-export([get_keygen/2, get_valgen/2]).
+
 -record(state, { id,
                  keygen,
                  valgen,
                  driver,
                  driver_state,
+                 api_pass_state,
                  shutdown_on_error,
                  ops,
                  ops_len,
@@ -102,18 +106,20 @@ init([SupChild, Id]) ->
     Ops     = ops_tuple(),
     ShutdownOnError = basho_bench_config:get(shutdown_on_error, false),
 
-    %% Finally, initialize key and value generation. We pass in our ID to the
-    %% initialization to enable (optional) key/value space partitioning
-    KeyGen = basho_bench_keygen:new(basho_bench_config:get(key_generator), Id),
-    ValGen = basho_bench_valgen:new(basho_bench_config:get(value_generator), Id),
+    %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
 
-    State = #state { id = Id, keygen = KeyGen, valgen = ValGen,
+    State0 = #state { id = Id, 
+                     api_pass_state = basho_bench_config:get(api_pass_state),
                      driver = Driver,
                      shutdown_on_error = ShutdownOnError,
                      ops = Ops, ops_len = size(Ops),
                      rng_seed = RngSeed,
                      parent_pid = self(),
                      sup_id = SupChild},
+
+    %% Finally, initialize key and value generation. We pass in our ID to the
+    %% initialization to enable (optional) key/value space partitioning
+    State = add_generators(State0),
 
     %% Use a dedicated sub-process to do the actual work. The work loop may need
     %% to sleep or otherwise delay in a way that would be inappropriate and/or
@@ -153,18 +159,18 @@ handle_cast(run, State) ->
     {noreply, State}.
 
 handle_info({'EXIT', Pid, Reason}, State) ->
-    case Reason of
-        normal ->
-            %% Clean shutdown of the worker; spawn a process to terminate this
-            %% process via the supervisor API and make sure it doesn't restart.
-            spawn(fun() -> stop_worker(State#state.sup_id) end),
-            {noreply, State};
-
-        _ ->
+    #state{worker_pid=WorkerPid} = State,
+    case {Reason, Pid} of
+        {normal, _} ->
+            %% Worker process exited normally
+            %% Stop this worker and check is there any other alive worker
+            basho_bench_terminator:worker_stopping(WorkerPid),
+            {stop, normal, State};
+        {_, WorkerPid} ->
             ?ERROR("Worker ~p exited with ~p~n", [Pid, Reason]),
             %% Worker process exited for some other reason; stop this process
             %% as well so that everything gets restarted by the sup
-            {stop, normal, State}
+            {stop, worker_died, State}
     end.
 
 terminate(_Reason, _State) ->
@@ -178,22 +184,6 @@ code_change(_OldVsn, State, _Extra) ->
 %% ====================================================================
 %% Internal functions
 %% ====================================================================
-
-%%
-%% Stop a worker process via the supervisor and terminate the app
-%% if there are no workers remaining
-%%
-%% WARNING: Must run from a process other than the worker!
-%%
-stop_worker(SupChild) ->
-    ok = basho_bench_sup:stop_child(SupChild),
-    case basho_bench_sup:workers() of
-        [] ->
-            %% No more workers -- stop the system
-            basho_bench_app:stop();
-        _ ->
-            ok
-    end.
 
 %%
 %% Expand operations list into tuple suitable for weighted, random draw
@@ -220,8 +210,12 @@ worker_idle_loop(State) ->
     Driver = State#state.driver,
     receive
         {init_driver, Caller} ->
-            %% Spin up the driver implementation
-            case catch(Driver:new(State#state.id)) of
+            %% Spin up the driver implementation, optionally support new approach of passing State
+            DriverNew = case State#state.api_pass_state of 
+                    false -> catch(Driver:new(State#state.id));
+                     _ -> catch(Driver:new(State#state.id, State))
+                end,
+            case DriverNew of 
                 {ok, DriverState} ->
                     Caller ! driver_ready,
                     ok;
@@ -248,9 +242,11 @@ worker_idle_loop(State) ->
             end
     end.
 
+worker_next_op2(#state{api_pass_state=false}=State, OpTag) ->
+    catch (State#state.driver):run(OpTag, State#state.keygen, State#state.valgen,State#state.driver_state);
 worker_next_op2(State, OpTag) ->
-   catch (State#state.driver):run(OpTag, State#state.keygen, State#state.valgen,
-                                  State#state.driver_state).
+   catch (State#state.driver):run(OpTag, State#state.driver_state, State).
+
 worker_next_op(State) ->
     Next = element(random:uniform(State#state.ops_len), State#state.ops),
     {_Label, OpTag} = Next,
@@ -315,20 +311,11 @@ worker_next_op(State) ->
     end.
 
 needs_shutdown(State) ->
-    Parent = State#state.parent_pid,
     receive
-        {'EXIT', Pid, _Reason} ->
-            case Pid of
-                Parent ->
-                    %% Give the driver a chance to cleanup
-                    (catch (State#state.driver):terminate(normal,
-                                                          State#state.driver_state)),
-                    true;
-                _Else ->
-                    %% catch this so that selective recieve doesn't kill us when running
-                    %% the riakclient_driver
-                    false
-            end
+        {'EXIT', _Pid, _Reason} ->
+            (catch (State#state.driver):terminate(normal,
+                                                  State#state.driver_state)),
+            true
     after 0 ->
             false
     end.
@@ -362,3 +349,24 @@ rate_worker_run_loop(State, Lambda) ->
         ExitReason ->
             exit(ExitReason)
     end.
+
+add_generators(#state{api_pass_state = ApiPassState,id=Id}=State) ->
+    KeyGen = init_generators(ApiPassState, basho_bench_config:get(key_generator), Id, basho_bench_keygen),
+    ValGen = init_generators(ApiPassState, basho_bench_config:get(value_generator), Id, basho_bench_valgen),
+    State#state{keygen=KeyGen, valgen=ValGen}.
+
+%% Not passing state API - expect non-list spec or error during new attempt
+init_generators(false, Config, Id, Module) when is_tuple(Config) ->
+    Module:new(Config, Id);
+%% Passing state API - process list or turn single-spec into [{default,Generator}]
+init_generators(true, Configs, Id, Module) when is_list(Configs) ->
+    [{N, Module:new(S, Id)} || {N,S} <- Configs].
+
+%% Accessor functions
+
+get_keygen(Name, State) ->
+    proplists:get_value(Name, State#state.keygen).
+
+get_valgen(Name, State) ->
+    proplists:get_value(Name, State#state.valgen).
+
