@@ -80,6 +80,7 @@ run_benchmark(Configs) ->
         [] ->
             ok;
         SourceDir ->
+	    ?INFO("Loading source dir ~p\n", [SourceDir]),
             load_source_files(SourceDir)
     end,
 

@@ -78,13 +78,16 @@ terminate(Reason, #state{duration=DurationMins}) ->
         WSup ->
             WRef = erlang:monitor(process, WSup),
             supervisor:terminate_child(basho_bench_run_sup, basho_bench_worker_sup),
+            supervisor:terminate_child(basho_bench_run_sup, basho_bench_stats),
             receive
                 {'DOWN', WRef, process, _Object, _Info} ->
                     ok
             end
     end,
     run_hook(basho_bench_config:get(post_hook, no_op)),
-    supervisor:terminate_child(basho_bench_sup, basho_bench_run_sup),
+    %% supervisor:terminate_child(basho_bench_sup, basho_bench_run_sup),
+    application:set_env(basho_bench_app, is_running, false),
+    basho_bench_app:stop(),
     case Reason of
         {shutdown, normal} ->
             ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);

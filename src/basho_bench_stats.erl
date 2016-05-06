@@ -294,10 +294,18 @@ process_global_stats(#state{stats_writer=Module}=State) ->
 %% number of successful and failed ops in this window of time.
 %%
 report_latency(#state{stats_writer=Module}=State, Elapsed, Window, Op) ->
-    Stats = folsom_metrics:get_histogram_statistics({latencies, Op}),
+    ?INFO("report_latency:start\n",[]),
+    %%Stats = folsom_metrics:get_histogram_statistics({latencies, Op}),
+    %%?INFO("folsom_metrics:get_histogram_statistics\n",[]),
+
+    Values = folsom_ets:get_values({latencies, Op}),
+    ?INFO("folsom_ets:get_values\n",[]),
+    Stats = bear:get_statistics(Values),
+    ?INFO("bear:get_statistics\n",[]),
+
     Errors = error_counter(Op),
     Units = folsom_metrics:get_metric_value({units, Op}),
-
+    ?INFO("folsom_metrics:get_metric_value\n",[]),
     Module:report_latency({State#state.stats_writer,
                                              State#state.stats_writer_data},
                                             Elapsed, Window, Op,
