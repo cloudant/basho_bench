@@ -87,6 +87,11 @@ stop(_State) ->
     %% eprof:stop_profiling(),
     %% eprof:analyze(total),
     %% eprof:log("bb.eprof"),
+    io:format("Stopping eprof profiling\n",[]),
+    profiling_stopped = eprof:stop_profiling(),
+    ok = eprof:analyze(total),
+    ok = eprof:log("bb.eprof"),
+    io:format("Stopped eprof profiling\n",[]),
     ok.
 
 %% ===================================================================
