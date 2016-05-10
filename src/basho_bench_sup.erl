@@ -48,8 +48,8 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    io:format("Starting eprof profiling in basho_bench_sup\n",[]),
-    {ok, _Pid} = eprof:start(),
-    profiling = eprof:start_profiling([self()]),
+    %% io:format("Starting eprof profiling in basho_bench_sup\n",[]),
+    %% {ok, _Pid} = eprof:start(),
+    %% profiling = eprof:start_profiling([self()]),
 
     {ok, {{one_for_one, 5, 10}, [?CHILD(basho_bench_config, worker)]}}.
