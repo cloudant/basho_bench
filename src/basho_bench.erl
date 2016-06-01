@@ -28,13 +28,16 @@
 
 
 start() ->
-    application:ensure_all_started(basho_bench).
+    io:format("basho_bench:start."),
+    application:ensure_all_started(basho_bench),
+    io:format("basho_bench:start done.").
 
 %% ====================================================================
 %% API
 %% ====================================================================
 
 setup_benchmark(Opts) ->
+    io:format("basho_bench:start_benchmark."),
     BenchName = bench_name(Opts),
     TestDir = test_dir(Opts, BenchName),
     application:set_env(basho_bench, test_dir, TestDir),
