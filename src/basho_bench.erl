@@ -29,8 +29,10 @@
 
 start() ->
     io:format("basho_bench:start."),
+    c:flush(),
     application:ensure_all_started(basho_bench),
-    io:format("basho_bench:start done.").
+    io:format("basho_bench:start done."),
+    c:flush().
 
 %% ====================================================================
 %% API
@@ -38,6 +40,7 @@ start() ->
 
 setup_benchmark(Opts) ->
     io:format("basho_bench:start_benchmark."),
+    c:flush(),
     BenchName = bench_name(Opts),
     TestDir = test_dir(Opts, BenchName),
     application:set_env(basho_bench, test_dir, TestDir),
