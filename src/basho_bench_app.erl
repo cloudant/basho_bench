@@ -39,6 +39,8 @@
 
 start() ->
     %% Redirect all SASL logging into a text file
+    io:format("basho_bench_app:start.", []),
+    c:flush(),
     case application:get_env(basho_bench,app_run_mode) of
        {ok, included} ->
           %%Make sure sasl and crypto is available
