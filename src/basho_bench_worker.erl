@@ -221,7 +221,7 @@ worker_idle_loop(State) ->
                     Caller ! driver_ready,
                     ok;
                 Error ->
-                    Caller ! {init_driver_failed, Error},
+                    Caller ! {driver_failed, Error},
                     DriverState = undefined, % Make erlc happy
                     ?FAIL_MSG("Failed to initialize driver ~p: ~p\n", [Driver, Error])
             end,
