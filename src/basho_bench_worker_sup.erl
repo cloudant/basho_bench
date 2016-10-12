@@ -69,10 +69,16 @@ init([]) ->
                 true -> 
                     FprofTraceFile = filename:join(basho_bench:get_test_dir(), "fprofTrace.log"),
                     ?CONSOLE("Starting fprof profiling to ~p\n", [FprofTraceFile]),
-                    {ok, Pid} = fprof:start(),
+                    {ok, _Pid} = fprof:start(),
                     fprof:trace([start, {file, FprofTraceFile}]);
                 false -> 
-                    ok
+                    case basho_bench_config:get(enable_cprof, false) of 
+                        true -> 
+                            ?CONSOLE("Starting cprof profiling\n", []),
+                             _funcCount = cprof:start();
+                        false ->
+                            ok
+                    end
             end
     end,
 

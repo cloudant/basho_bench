@@ -121,7 +121,16 @@ terminate(Reason, #state{duration=DurationMins}) ->
                     fprof:analyse([{dest, FprofFile}]),
                     file:delete(FprofTraceFile);
                 false ->
-                    ok
+                    case basho_bench_config:get(enable_cprof, false) of 
+                        true -> 
+                            CprofFile = filename:join(basho_bench:get_test_dir(), "cprof.log"),
+                            ?CONSOLE("Writing cprof profiling to ~p\n", [CprofFile]),
+                            CprofData = cprof:analyse(),
+                            file:write_file(CprofFile, io_lib:fwrite("~p.\n", [CprofData])),
+                            cprof:stop();
+                        false ->
+                            ok
+                    end
             end
     end,
     supervisor:terminate_child(basho_bench_sup, basho_bench_run_sup),
