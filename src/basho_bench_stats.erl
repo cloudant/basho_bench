@@ -66,8 +66,10 @@ op_complete(Op, {ok, Units}, ElapsedUs) ->
         true ->
             gen_server:cast({global, ?MODULE}, {Op, {ok, Units}, ElapsedUs});
         false ->
-            folsom_metrics:notify({latencies, Op}, ElapsedUs),
-            folsom_metrics:notify({units, Op}, {inc, Units})
+            folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
+            folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
+            folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
+            folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter)
     end,
     ok;
 op_complete(Op, Result, ElapsedUs) ->
@@ -83,7 +85,7 @@ init([]) ->
     process_flag(priority, high),
 
     %% Spin up folsom
-    folsom:start(),
+    %% folsom:start(),
 
     %% Initialize an ETS table to track error and crash counters during
     %% reporting interval
@@ -111,6 +113,8 @@ init([]) ->
     %% successful operations
     [begin
          folsom_metrics:new_histogram({latencies, Op}, slide, basho_bench_config:get(report_interval)),
+         folsom_metrics:new_histogram({overall_latencies, Op}, uniform, 16384),
+         folsom_metrics:new_counter({overall_units, Op}),
          folsom_metrics:new_counter({units, Op})
      end || Op <- Ops ++ Measurements],
 
@@ -155,8 +159,10 @@ handle_cast({Op, {ok, Units}, ElapsedUs}, State = #state{last_write_time = LWT, 
         true ->
             NewState = State
     end,
-    folsom_metrics:notify({latencies, Op}, ElapsedUs),
-    folsom_metrics:notify({units, Op}, {inc, Units}),
+    folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
+    folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
+    folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
+    folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter),
     {noreply, NewState};
 handle_cast(_, State) ->
     {noreply, State}.
@@ -171,6 +177,9 @@ terminate(_Reason, #state{stats_writer=Module}=State) ->
     %% Do the final stats report and write the errors file
     process_stats(os:timestamp(), State),
     report_total_errors(State),
+
+    %% Report run wide statistics
+    process_global_stats(State),
 
     Module:terminate(State#state.stats_writer_data).
 
@@ -269,6 +278,16 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
         false ->
             ok
     end.
+
+process_global_stats(#state{stats_writer=Module}=State) ->
+    %% Iterate over all Ops and report out each set of Statistics
+    lists:foreach(fun(Op) ->
+        %% Report out the statistics captured across the whole run
+        Stats = folsom_metrics:get_histogram_statistics({overall_latencies, Op}),
+        Errors = error_counter(Op),
+        Units = folsom_metrics:get_metric_value({overall_units, Op}),
+        Module:report_global_stats(Op, Stats, Errors, Units)
+    end, State#state.ops).
 
 %%
 %% Write latency info for a given op to the appropriate CSV. Returns the
