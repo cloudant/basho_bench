@@ -27,20 +27,30 @@
 -export([start_link/2,
          start_link_local/2,
          run/1,
-         stop/1]).
+         stop/1,
+         config_get/1, config_get/2, config_get/3,
+         lookup_value/2, lookup_value/3
+]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
+
+%% State accessors
+-export([get_keygen/2, get_valgen/2]).
 
 -record(state, { id,
                  keygen,
                  valgen,
                  driver,
                  driver_state,
+                 api_pass_state,
+                 worker_type,
+                 local_config,
                  shutdown_on_error,
                  ops,
                  ops_len,
+                 ops_configs,
                  rng_seed,
                  parent_pid,
                  worker_pid,
@@ -53,10 +63,10 @@
 %% ====================================================================
 
 start_link(SupChild, Id) ->
-    case basho_bench_config:get(distribute_work, false) of 
-        true -> 
+    case basho_bench_config:get(distribute_work, false) of
+        true ->
             start_link_distributed(SupChild, Id);
-        false -> 
+        false ->
             start_link_local(SupChild, Id)
     end.
 
@@ -80,6 +90,21 @@ stop(Pids) ->
 %% ====================================================================
 
 init([SupChild, Id]) ->
+    %% If workers are being used, WorkerType will be set to next needed type
+    %% and LocalConfig will be set from the associated config in worker_types
+    WorkerType = basho_bench_config:next_worker(),
+    ?DEBUG("init ID ~p WorkerType=~p~n", [Id, WorkerType]),
+    LocalConfig =
+        case WorkerType of
+            no_workers ->
+                [];
+            _ ->
+                % TODO: Improve error reporting,
+                %    but with no worker_types or specific worker defined should complain
+                WorkerTypes = basho_bench_config:get(worker_types),
+                lookup_value(WorkerType, WorkerTypes)
+        end,
+
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
     %% the worker to ensure consistency in load-gen
     %%
@@ -90,7 +115,7 @@ init([SupChild, Id]) ->
     %% and value size generation between test runs.
     process_flag(trap_exit, true),
     {A1, A2, A3} =
-        case basho_bench_config:get(rng_seed, {42, 23, 12}) of
+        case config_get(rng_seed, {42, 23, 12}, LocalConfig) of
             {Aa, Ab, Ac} -> {Aa, Ab, Ac};
             now -> now()
         end,
@@ -98,22 +123,35 @@ init([SupChild, Id]) ->
     RngSeed = {A1+Id, A2+Id, A3+Id},
 
     %% Pull all config settings from environment
-    Driver  = basho_bench_config:get(driver),
-    Ops     = ops_tuple(),
-    ShutdownOnError = basho_bench_config:get(shutdown_on_error, false),
+    Driver  = config_get(driver, LocalConfig),
+    Operations = config_get(operations, LocalConfig),
+    Ops     = ops_tuple(Operations),
+    ShutdownOnError = config_get(shutdown_on_error, false, LocalConfig),
 
     %% Finally, initialize key and value generation. We pass in our ID to the
     %% initialization to enable (optional) key/value space partitioning
-    KeyGen = basho_bench_keygen:new(basho_bench_config:get(key_generator), Id),
-    ValGen = basho_bench_valgen:new(basho_bench_config:get(value_generator), Id),
+    KeyGen = basho_bench_keygen:new(config_get(key_generator, LocalConfig), Id),
+    ValGen = basho_bench_valgen:new(config_get(value_generator, LocalConfig), Id),
 
-    State = #state { id = Id, keygen = KeyGen, valgen = ValGen,
+    %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
+    OptionsConfigs = ops_configs(Id, Operations),
+    State0 = #state {id = Id,
+                     keygen = KeyGen,
+                     valgen = ValGen,
+                     api_pass_state = basho_bench_config:get(api_pass_state),
                      driver = Driver,
+                     local_config = LocalConfig,
+                     worker_type = WorkerType,
                      shutdown_on_error = ShutdownOnError,
                      ops = Ops, ops_len = size(Ops),
+                     ops_configs = OptionsConfigs,
                      rng_seed = RngSeed,
                      parent_pid = self(),
                      sup_id = SupChild},
+
+    %% Finally, initialize key and value generation. We pass in our ID to the
+    %% initialization to enable (optional) key/value space partitioning
+    State = add_generators(State0),
 
     %% Use a dedicated sub-process to do the actual work. The work loop may need
     %% to sleep or otherwise delay in a way that would be inappropriate and/or
@@ -123,12 +161,13 @@ init([SupChild, Id]) ->
     %%
     %% Link the worker and the sub-process to ensure that if either exits, the
     %% other goes with it.
+    %% WorkerPid is the driver process id which is linked with basho_bench_worker id
     WorkerPid = spawn_link(fun() -> worker_init(State) end),
     WorkerPid ! {init_driver, self()},
     receive
         driver_ready ->
             ok;
-        {driver_failed, Why} ->
+        {init_driver_failed, Why} ->
             exit({init_driver_failed, Why})
     end,
 
@@ -153,18 +192,18 @@ handle_cast(run, State) ->
     {noreply, State}.
 
 handle_info({'EXIT', Pid, Reason}, State) ->
-    case Reason of
-        normal ->
-            %% Clean shutdown of the worker; spawn a process to terminate this
-            %% process via the supervisor API and make sure it doesn't restart.
-            spawn(fun() -> stop_worker(State#state.sup_id) end),
-            {noreply, State};
-
-        _ ->
+    #state{worker_pid=WorkerPid} = State,
+    case {Reason, Pid} of
+        {normal, _} ->
+            %% Worker process exited normally
+            %% Stop this worker and check is there any other alive worker
+            basho_bench_duration:worker_stopping(self()),
+            {stop, normal, State};
+        {_, WorkerPid} ->
             ?ERROR("Worker ~p exited with ~p~n", [Pid, Reason]),
             %% Worker process exited for some other reason; stop this process
             %% as well so that everything gets restarted by the sup
-            {stop, normal, State}
+            {stop, worker_died, State}
     end.
 
 terminate(_Reason, _State) ->
@@ -173,6 +212,65 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% ====================================================================
+%% Additional Exported Functions
+%% ====================================================================
+
+%% get works with either LocalConfig list or #state.local_config in provided State
+%% if value is not found in LocalConfig list then basho_bench_config:get is called
+%% if no value is found and no default is provided, returns an error
+
+config_get(Key) ->
+    config_get(Key, undefined, []).
+
+config_get(Key, #state{local_config=LocalConfig}) ->
+    config_get(Key, undefined, LocalConfig);
+config_get(Key, LocalConfig) ->
+    config_get(Key, undefined, LocalConfig).
+
+config_get(Key, Default, #state{local_config=LocalConfig}) ->
+   config_get(Key, Default, LocalConfig);
+config_get(Key, Default, LocalConfig) ->
+    Value =
+        case V = erlang:get(Key) of
+            undefined ->
+                lookup_value(Key, LocalConfig);
+            _ -> V
+        end,
+    case Value of
+        undefined ->
+            basho_bench_config:get(Key,Default);
+        _ ->
+            Value
+    end.
+
+%% lookup_value finds a given {Key,Value} pair in a provided list or returns undefined
+lookup_value(Key, Default, LocalConfig) ->
+    case Value = lookup_value(Key, LocalConfig) of
+        undefined ->
+            Default;
+         _ ->
+            Value
+    end.
+
+lookup_value(_Key, undefined) ->
+    undefined;
+lookup_value(_Key, []) ->
+    undefined;
+lookup_value(Key, [Term | Tail]) ->
+    {K,V} = Term,
+    case K =:= Key of
+        true ->
+            V;
+        _ ->
+            lookup_value(Key,Tail)
+    end.
+
+publish_config([]) ->
+    ok;
+publish_config([{Key,Value} | RestConfig]) ->
+    erlang:put(Key,Value),
+    publish_config(RestConfig).
 
 
 %% ====================================================================
@@ -180,39 +278,52 @@ code_change(_OldVsn, State, _Extra) ->
 %% ====================================================================
 
 %%
-%% Stop a worker process via the supervisor and terminate the app
-%% if there are no workers remaining
-%%
-%% WARNING: Must run from a process other than the worker!
-%%
-stop_worker(SupChild) ->
-    ok = basho_bench_sup:stop_child(SupChild),
-    case basho_bench_sup:workers() of
-        [] ->
-            %% No more workers -- stop the system
-            basho_bench_app:stop();
-        _ ->
-            ok
-    end.
-
-%%
 %% Expand operations list into tuple suitable for weighted, random draw
 %%
-ops_tuple() ->
+ops_tuple(Operations) ->
     F =
         fun({OpTag, Count}) ->
                 lists:duplicate(Count, {OpTag, OpTag});
            ({Label, OpTag, Count}) ->
+                lists:duplicate(Count, {Label, OpTag});
+           ({Label, OpTag, Count, _OptionsList}) ->
                 lists:duplicate(Count, {Label, OpTag})
         end,
-    Ops = [F(X) || X <- basho_bench_config:get(operations, [])],
+    Ops = [F(X) || X <- Operations],
     list_to_tuple(lists:flatten(Ops)).
 
+%%
+%% Expand operations list into initialized operations configuration information where used
+%%
+
+ops_configs(Id, Operations) ->
+    ops_configs(Id, Operations, []).
+
+%% Process individual operation entries in Operations list
+ops_configs(_Id, [], ACC) ->
+    ACC;
+ops_configs(Id, [{_Label, OpTag, _Count, OptionsList}|RestOps], ACC) ->
+    ops_configs(Id, RestOps, [ {OpTag, ops_configs_list(Id, OptionsList, [])} | ACC]);
+ops_configs(Id, [_Op|RestOps], ACC) ->
+    ops_configs(Id, RestOps, ACC).
+
+% Process individual config parameter entries within an Operations OptionsList
+ops_configs_list(_Id, [], ACC) ->
+    ACC;
+% Treat keygen and valuegen specially, converting keygen/valgen specification into actual object for later use
+ops_configs_list(Id, [{key_generator, KeyGenOption} | RestOptions], ACC) ->
+    ops_configs_list(Id, RestOptions, [ {keygen, basho_bench_keygen:new(KeyGenOption, Id)} | ACC]);
+ops_configs_list(Id, [{value_generator, ValGenOption} | RestOptions], ACC) ->
+    ops_configs_list(Id, RestOptions, [ {valgen, basho_bench_valgen:new(ValGenOption, Id)} | ACC]);
+% Allow remaining options to pass through
+ops_configs_list(Id, [KeyValuePair | RestOptions], ACC) ->
+    ops_configs(Id, RestOptions, [ KeyValuePair | ACC]).
 
 worker_init(State) ->
     %% Trap exits from linked parent process; use this to ensure the driver
     %% gets a chance to cleanup
     process_flag(trap_exit, true),
+    publish_config(State#state.local_config),
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
 
@@ -220,19 +331,23 @@ worker_idle_loop(State) ->
     Driver = State#state.driver,
     receive
         {init_driver, Caller} ->
-            %% Spin up the driver implementation
-            case catch(Driver:new(State#state.id)) of
+            %% Spin up the driver implementation, optionally support new approach of passing State
+            DriverNew = case State#state.api_pass_state of
+                    false -> catch(Driver:new(State#state.id));
+                     _ -> catch(Driver:new(State#state.id, State))
+                end,
+            case DriverNew of
                 {ok, DriverState} ->
                     Caller ! driver_ready,
                     ok;
                 Error ->
-                    Caller ! {init_driver_failed, Error},
+                    ?FAIL_MSG("Failed to initialize driver ~p: ~p\n", [Driver, Error]),
                     DriverState = undefined, % Make erlc happy
-                    ?FAIL_MSG("Failed to initialize driver ~p: ~p\n", [Driver, Error])
+                    Caller ! {init_driver_failed, Error}
             end,
             worker_idle_loop(State#state { driver_state = DriverState });
         run ->
-            case basho_bench_config:get(mode) of
+            case config_get(mode, State) of
                 max ->
                     ?INFO("Starting max worker: ~p on ~p~n", [self(), node()]),
                     max_worker_run_loop(State);
@@ -248,18 +363,28 @@ worker_idle_loop(State) ->
             end
     end.
 
+worker_next_op2(#state{api_pass_state=false}=State, OpTag) ->
+    catch (State#state.driver):run(OpTag, State#state.keygen, State#state.valgen,State#state.driver_state);
 worker_next_op2(State, OpTag) ->
-   catch (State#state.driver):run(OpTag, State#state.keygen, State#state.valgen,
+   OpConfig = lookup_value(OpTag, State#state.ops_configs),
+   KeyGen = lookup_value(keygen, State#state.keygen, OpConfig),
+   ValueGen = lookup_value(valuegen, State#state.valgen, OpConfig),
+   catch (State#state.driver):run(OpTag, KeyGen, ValueGen,
                                   State#state.driver_state).
+
 worker_next_op(State) ->
     Next = element(random:uniform(State#state.ops_len), State#state.ops),
-    {_Label, OpTag} = Next,
+    {Label, OpTag} = Next,
     Start = os:timestamp(),
     Result = worker_next_op2(State, OpTag),
     ElapsedUs = erlang:max(0, timer:now_diff(os:timestamp(), Start)),
+
+    %%TODO: May WORK but ugly/horrible way to apply worker_type name so revisit
+    OpName = { basho_bench_stats:worker_op_name(State#state.worker_type, Label),
+               basho_bench_stats:worker_op_name(State#state.worker_type, OpTag)},
     case Result of
         {Res, DriverState} when Res == ok orelse element(1, Res) == ok ->
-            basho_bench_stats:op_complete(Next, Res, ElapsedUs),
+            basho_bench_stats:op_complete(OpName, Res, ElapsedUs),
             {ok, State#state { driver_state = DriverState}};
 
         {Res, DriverState} when Res == silent orelse element(1, Res) == silent ->
@@ -267,12 +392,12 @@ worker_next_op(State) ->
 
         {ok, ElapsedT, DriverState} ->
             %% time is measured by external system
-            basho_bench_stats:op_complete(Next, ok, ElapsedT),
+            basho_bench_stats:op_complete(OpName, ok, ElapsedT),
             {ok, State#state { driver_state = DriverState}};
 
         {error, Reason, DriverState} ->
             %% Driver encountered a recoverable error
-            basho_bench_stats:op_complete(Next, {error, Reason}, ElapsedUs),
+            basho_bench_stats:op_complete(OpName, {error, Reason}, ElapsedUs),
             State#state.shutdown_on_error andalso
                 erlang:send_after(500, basho_bench,
                                   {shutdown, "Shutdown on errors requested", 1}),
@@ -281,7 +406,7 @@ worker_next_op(State) ->
         {'EXIT', Reason} ->
             %% Driver crashed, generate a crash error and terminate. This will take down
             %% the corresponding worker which will get restarted by the appropriate supervisor.
-            basho_bench_stats:op_complete(Next, {error, crash}, ElapsedUs),
+            basho_bench_stats:op_complete(OpName, {error, crash}, ElapsedUs),
 
             %% Give the driver a chance to cleanup
             (catch (State#state.driver):terminate({'EXIT', Reason}, State#state.driver_state)),
@@ -315,20 +440,11 @@ worker_next_op(State) ->
     end.
 
 needs_shutdown(State) ->
-    Parent = State#state.parent_pid,
     receive
-        {'EXIT', Pid, _Reason} ->
-            case Pid of
-                Parent ->
-                    %% Give the driver a chance to cleanup
-                    (catch (State#state.driver):terminate(normal,
-                                                          State#state.driver_state)),
-                    true;
-                _Else ->
-                    %% catch this so that selective recieve doesn't kill us when running
-                    %% the riakclient_driver
-                    false
-            end
+        {'EXIT', _Pid, _Reason} ->
+            (catch (State#state.driver):terminate(normal,
+                                                  State#state.driver_state)),
+            true
     after 0 ->
             false
     end.
@@ -362,3 +478,26 @@ rate_worker_run_loop(State, Lambda) ->
         ExitReason ->
             exit(ExitReason)
     end.
+
+%% TODO: Not sure what add_generators does or how it might need to be changed
+%% but it may overlap/conflict with the multi-worker approach
+
+add_generators(#state{api_pass_state = ApiPassState,id=Id}=State) ->
+    KeyGen = init_generators(ApiPassState, basho_bench_config:get(key_generator), Id, basho_bench_keygen),
+    ValGen = init_generators(ApiPassState, basho_bench_config:get(value_generator), Id, basho_bench_valgen),
+    State#state{keygen=KeyGen, valgen=ValGen}.
+
+%% Not passing state API - expect non-list spec or error during new attempt
+init_generators(false, Config, Id, Module) when is_tuple(Config) ->
+    Module:new(Config, Id);
+%% Passing state API - process list or turn single-spec into [{default,Generator}]
+init_generators(true, Configs, Id, Module) when is_list(Configs) ->
+    [{N, Module:new(S, Id)} || {N,S} <- Configs].
+
+%% Accessor functions
+
+get_keygen(Name, State) ->
+    proplists:get_value(Name, State#state.keygen).
+
+get_valgen(Name, State) ->
+    proplists:get_value(Name, State#state.valgen).

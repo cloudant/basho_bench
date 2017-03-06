@@ -16,7 +16,7 @@
 %% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 %% KIND, either express or implied.  See the License for the
 %% specific language governing permissions and limitations
-%% under the License.    
+%% under the License.
 %%
 %% -------------------------------------------------------------------
 -module(basho_bench_stats).
@@ -27,6 +27,8 @@
 -export([start_link/0,
          exponential/1,
          run/0,
+         get_active_ops/0,
+         worker_op_name/2,
          op_complete/3]).
 
 %% gen_server callbacks
@@ -66,8 +68,10 @@ op_complete(Op, {ok, Units}, ElapsedUs) ->
         true ->
             gen_server:cast({global, ?MODULE}, {Op, {ok, Units}, ElapsedUs});
         false ->
-            folsom_metrics:notify({latencies, Op}, ElapsedUs),
-            folsom_metrics:notify({units, Op}, {inc, Units})
+            folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
+            folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
+            folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
+            folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter)
     end,
     ok;
 op_complete(Op, Result, ElapsedUs) ->
@@ -83,7 +87,7 @@ init([]) ->
     process_flag(priority, high),
 
     %% Spin up folsom
-    folsom:start(),
+    %% folsom:start(),
 
     %% Initialize an ETS table to track error and crash counters during
     %% reporting interval
@@ -94,11 +98,7 @@ init([]) ->
     ets:new(basho_bench_total_errors, [protected, named_table]),
 
     %% Get the list of operations we'll be using for this test
-    F1 =
-        fun({OpTag, _Count}) -> {OpTag, OpTag};
-           ({Label, OpTag, _Count}) -> {Label, OpTag}
-        end,
-    Ops = [F1(X) || X <- basho_bench_config:get(operations, [])],
+    Ops = get_active_ops(),
 
     %% Get the list of measurements we'll be using for this test
     F2 =
@@ -111,6 +111,8 @@ init([]) ->
     %% successful operations
     [begin
          folsom_metrics:new_histogram({latencies, Op}, slide, basho_bench_config:get(report_interval)),
+         folsom_metrics:new_histogram({overall_latencies, Op}, uniform, 16384),
+         folsom_metrics:new_counter({overall_units, Op}),
          folsom_metrics:new_counter({units, Op})
      end || Op <- Ops ++ Measurements],
 
@@ -155,8 +157,10 @@ handle_cast({Op, {ok, Units}, ElapsedUs}, State = #state{last_write_time = LWT, 
         true ->
             NewState = State
     end,
-    folsom_metrics:notify({latencies, Op}, ElapsedUs),
-    folsom_metrics:notify({units, Op}, {inc, Units}),
+    folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
+    folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
+    folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
+    folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter),
     {noreply, NewState};
 handle_cast(_, State) ->
     {noreply, State}.
@@ -171,6 +175,9 @@ terminate(_Reason, #state{stats_writer=Module}=State) ->
     %% Do the final stats report and write the errors file
     process_stats(os:timestamp(), State),
     report_total_errors(State),
+
+    %% Report run wide statistics
+    process_global_stats(State),
 
     Module:terminate(State#state.stats_writer_data).
 
@@ -263,12 +270,22 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
             ErrCounts = ets:tab2list(basho_bench_errors),
             true = ets:delete_all_objects(basho_bench_errors),
             ?INFO("Errors:~p\n", [lists:sort(ErrCounts)]),
-            [ets_increment(basho_bench_total_errors, Err, Count) || 
+            [ets_increment(basho_bench_total_errors, Err, Count) ||
                               {Err, Count} <- ErrCounts],
             ok;
         false ->
             ok
     end.
+
+process_global_stats(#state{stats_writer=Module}=State) ->
+    %% Iterate over all Ops and report out each set of Statistics
+    lists:foreach(fun(Op) ->
+        %% Report out the statistics captured across the whole run
+        Stats = folsom_metrics:get_histogram_statistics({overall_latencies, Op}),
+        Errors = error_counter(Op),
+        Units = folsom_metrics:get_metric_value({overall_units, Op}),
+        Module:report_global_stats(Op, Stats, Errors, Units)
+    end, State#state.ops).
 
 %%
 %% Write latency info for a given op to the appropriate CSV. Returns the
@@ -318,3 +335,59 @@ consume_report_msgs() ->
 normalize_name(StatsSink) when is_atom(StatsSink) ->
     {ok, list_to_atom("basho_bench_stats_writer_" ++ atom_to_list(StatsSink))};
 normalize_name(StatsSink) -> {error, {StatsSink, invalid_name}}.
+
+
+% Build up the list of operations taking into account the user of worker groups
+% If workers are not used, use the global operations list
+% If workers are being used, use worker_type as an operation prefix,
+%    using either global or per-worker operations depending on the situation.
+%
+% TODO: Think about checking for 0-counts to make it easier to reconfig runs
+% TODO: Understand how undocumented Labels are being used
+
+get_active_ops() ->
+   Workers = basho_bench_config:get(workers, []),
+   case Workers of
+       %% No workers reverts to original case is fine as long as we stick with 2-tuples
+       [] ->
+           F1 =
+               fun({OpTag, _Count}) -> {OpTag, OpTag};
+                  ({Label, OpTag, _Count}) -> {Label, OpTag};
+                  ({Label, OpTag, _Count, _OptionsList}) -> {Label, OpTag}
+               end,
+           [F1(X) || X <- basho_bench_config:get(operations, [])];
+
+        _ ->
+           get_worker_ops(Workers, basho_bench_config:get(worker_types), [])
+    end.
+
+get_worker_ops([],_WorkerTypes, ACC) ->
+     ACC;
+get_worker_ops(Workers, WorkerTypes, ACC) ->
+     [ WorkerEntry | RestWorkers ] = Workers,
+     {WorkerType, _Count} = WorkerEntry,
+     WorkerConfig = basho_bench_worker:config_get(WorkerType, WorkerTypes),
+     %% Get either per-worker ops or global ops
+     WorkerOps = basho_bench_worker:config_get(operations, WorkerConfig),
+
+     %%TODO: Not sure why the 2-tuples are needed here but they are
+     %%TODO: Not sure about how Label is intended for use either
+     F1 =
+        fun({OpTag, _Count2}) ->
+                { worker_op_name(WorkerType,OpTag), worker_op_name(WorkerType,OpTag)};
+           ({Label, OpTag, _Count2}) ->
+                { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)};
+           ({Label, OpTag, __ount, _OptionsList}) ->
+                { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)}
+        end,
+     Ops = [F1(X) || X <- WorkerOps],
+     get_worker_ops(RestWorkers, WorkerTypes, ACC++Ops).
+
+%% QUESTION: Generating atoms is not ideal - better way to handle this ? Needed for stats output too
+worker_op_name(Worker,Op) ->
+    Sep="_",
+    case Worker of
+        no_workers -> Op;
+        _ ->
+            list_to_atom(atom_to_list(Worker)++Sep++atom_to_list(Op))
+    end.
