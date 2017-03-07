@@ -104,6 +104,7 @@ init([SupChild, Id]) ->
                 WorkerTypes = basho_bench_config:get(worker_types),
                 lookup_value(WorkerType, WorkerTypes)
         end,
+    ?DEBUG("init LocalConfig~p~n", [LocalConfig]),
 
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
     %% the worker to ensure consistency in load-gen
@@ -267,8 +268,10 @@ lookup_value(Key, [Term | Tail]) ->
     end.
 
 publish_config([]) ->
+    ?DEBUG("publish_config []~n", []),
     ok;
 publish_config([{Key,Value} | RestConfig]) ->
+    ?DEBUG("publish_config Key=~p Value=~p~n", [Key, Value]),
     erlang:put(Key,Value),
     publish_config(RestConfig).
 
@@ -322,12 +325,15 @@ ops_configs_list(Id, [KeyValuePair | RestOptions], ACC) ->
 worker_init(State) ->
     %% Trap exits from linked parent process; use this to ensure the driver
     %% gets a chance to cleanup
+    ?DEBUG("worker_init~n", []),
     process_flag(trap_exit, true),
+    ?DEBUG("calling publish_config ~n", []),
     publish_config(State#state.local_config),
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
 
 worker_idle_loop(State) ->
+    ?DEBUG("worker_idle_loop",[]),
     Driver = State#state.driver,
     receive
         {init_driver, Caller} ->

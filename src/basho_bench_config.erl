@@ -142,10 +142,20 @@ handle_call({set, Key, Value}, _From, State) ->
     application:set_env(basho_bench, Key, Value), 
     {reply, ok, State};
 handle_call({get, Key}, _From, State) ->
-    Value = application:get_env(basho_bench, Key),
+    ?DEBUG("basho_bench_config:handle_call(get, key=~p)", [Key]),
+    ProcessValue = erlang:get(Key),
+    case ProcessValue of
+        undefined ->
+            Value = application:get_env(basho_bench, Key),
+            ?DEBUG(" get_env = ~p~n", [Value]);
+        _ ->
+            Value = ProcessValue,
+            ?DEBUG(" erlang:get = ~p~n", [Value])
+    end,
     {reply, Value, State};
 
 handle_call({next_worker}, From, #basho_bench_config_state{workers=Workers}=State) ->
+    ?DEBUG("handle_call: next_worker", []),
     case Workers of 
         %% Load Workers the first time or when we've exhausted the list and need to refill it
         [] -> 
