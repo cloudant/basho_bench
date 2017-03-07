@@ -66,10 +66,11 @@ op_complete(Op, {ok, Units}, ElapsedUs) ->
         true ->
             gen_server:cast({global, ?MODULE}, {Op, {ok, Units}, ElapsedUs});
         false ->
-            folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
-            folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
-            folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
-            folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter)
+            %folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
+            %folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
+            %folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
+            %folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter),
+            ok
     end,
     ok;
 op_complete(Op, Result, ElapsedUs) ->
@@ -159,10 +160,10 @@ handle_cast({Op, {ok, Units}, ElapsedUs}, State = #state{last_write_time = LWT, 
         true ->
             NewState = State
     end,
-    folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
-    folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
-    folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
-    folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter),
+    %folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
+    %folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
+    %folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
+    %folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter),
     {noreply, NewState};
 handle_cast(_, State) ->
     {noreply, State}.
@@ -248,23 +249,23 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
     %% Determine how much time has elapsed (seconds) since our last report
     %% If zero seconds, round up to one to avoid divide-by-zeros in reporting
     %% tools.
-    Elapsed = timer:now_diff(Now, State#state.start_time) / 1000000,
-    Window  = timer:now_diff(Now, State#state.last_write_time) / 1000000,
-
-    %% Time to report latency data to our CSV files
-    {Oks, Errors, OkOpsRes} =
-        lists:foldl(fun(Op, {TotalOks, TotalErrors, OpsResAcc}) ->
-                            {Oks, Errors} = report_latency(State, Elapsed, Window, Op),
-                            {TotalOks + Oks, TotalErrors + Errors,
-                             [{Op, Oks}|OpsResAcc]}
-                    end, {0,0,[]}, State#state.ops),
-
-    %% Reset units
-    [folsom_metrics_counter:dec({units, Op}, OpAmount) || {Op, OpAmount} <- OkOpsRes],
-
-    %% Write summary
-    Module:process_summary(State#state.stats_writer_data,
-                           Elapsed, Window, Oks, Errors),
+%%     Elapsed = timer:now_diff(Now, State#state.start_time) / 1000000,
+%%     Window  = timer:now_diff(Now, State#state.last_write_time) / 1000000,
+%% 
+%%     % Time to report latency data to our CSV files
+%%     {Oks, Errors, OkOpsRes} =
+%%         lists:foldl(fun(Op, {TotalOks, TotalErrors, OpsResAcc}) ->
+%%                             {Oks, Errors} = report_latency(State, Elapsed, Window, Op),
+%%                             {TotalOks + Oks, TotalErrors + Errors,
+%%                              [{Op, Oks}|OpsResAcc]}
+%%                     end, {0,0,[]}, State#state.ops),
+%% 
+%%     %% Reset units
+%%     [folsom_metrics_counter:dec({units, Op}, OpAmount) || {Op, OpAmount} <- OkOpsRes],
+%% 
+%%     %% Write summary
+%%     Module:process_summary(State#state.stats_writer_data,
+%%                            Elapsed, Window, Oks, Errors),
 
     %% Dump current error counts to console
     case (State#state.errors_since_last_report) of
@@ -281,13 +282,14 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
 
 process_global_stats(#state{stats_writer=Module}=State) ->
     %% Iterate over all Ops and report out each set of Statistics
-    lists:foreach(fun(Op) ->
-        %% Report out the statistics captured across the whole run
-        Stats = folsom_metrics:get_histogram_statistics({overall_latencies, Op}),
-        Errors = error_counter(Op),
-        Units = folsom_metrics:get_metric_value({overall_units, Op}),
-        Module:report_global_stats(Op, Stats, Errors, Units)
-    end, State#state.ops).
+    ok.
+    %lists:foreach(fun(Op) ->
+    %    %% Report out the statistics captured across the whole run
+    %    Stats = folsom_metrics:get_histogram_statistics({overall_latencies, Op}),
+    %    Errors = error_counter(Op),
+    %    Units = folsom_metrics:get_metric_value({overall_units, Op}),
+    %    Module:report_global_stats(Op, Stats, Errors, Units)
+    %end, State#state.ops).
 
 %%
 %% Write latency info for a given op to the appropriate CSV. Returns the
