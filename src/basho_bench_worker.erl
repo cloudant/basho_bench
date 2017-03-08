@@ -29,6 +29,7 @@
          run/1,
          stop/1,
          config_get/1, config_get/2, config_get/3,
+         get_local_config/0,
          lookup_value/2, lookup_value/3
 ]).
 
@@ -184,6 +185,10 @@ init([SupChild, Id]) ->
 
     {ok, State#state { worker_pid = WorkerPid }}.
 
+handle_call(get_local_config, _From, State) ->
+    ?DEBUG("basho_bench_worker:handle_call(get_local_config)",[]),
+    {reply, State#state.local_config, State};
+    
 handle_call(run, _From, State) ->
     State#state.worker_pid ! run,
     {reply, ok, State}.
@@ -217,6 +222,9 @@ code_change(_OldVsn, State, _Extra) ->
 %% Additional Exported Functions
 %% ====================================================================
 
+get_local_config() ->
+    erlang:get(local_config).
+    
 %% get works with either LocalConfig list or #state.local_config in provided State
 %% if value is not found in LocalConfig list then basho_bench_config:get is called
 %% if no value is found and no default is provided, returns an error
@@ -232,6 +240,7 @@ config_get(Key, LocalConfig) ->
 config_get(Key, Default, #state{local_config=LocalConfig}) ->
    config_get(Key, Default, LocalConfig);
 config_get(Key, Default, LocalConfig) ->
+    ?DEBUG("basho_bench_worker:config_get(~p, ~p, ~p)", [Key, Default, LocalConfig]),
     Value =
         case V = erlang:get(Key) of
             undefined ->
@@ -271,8 +280,9 @@ publish_config([]) ->
     ?DEBUG("publish_config []~n", []),
     ok;
 publish_config([{Key,Value} | RestConfig]) ->
-    ?DEBUG("publish_config Key=~p Value=~p~n", [Key, Value]),
+    ?DEBUG("publish_config Key=~p Value=~p (Pid ~p)~n", [Key, Value, self()]),
     erlang:put(Key,Value),
+    ?DEBUG("publish_config check - value=~p~n", [erlang:get(Key)]),
     publish_config(RestConfig).
 
 
@@ -328,15 +338,16 @@ worker_init(State) ->
     ?DEBUG("worker_init~n", []),
     process_flag(trap_exit, true),
     ?DEBUG("calling publish_config ~n", []),
-    publish_config(State#state.local_config),
+    erlang:put(local_config, State#state.local_config),
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
 
 worker_idle_loop(State) ->
-    ?DEBUG("worker_idle_loop",[]),
+    ?DEBUG("worker_idle_loop - Pid ~p",[self()]),
     Driver = State#state.driver,
     receive
         {init_driver, Caller} ->
+            
             %% Spin up the driver implementation, optionally support new approach of passing State
             DriverNew = case State#state.api_pass_state of
                     false -> catch(Driver:new(State#state.id));
