@@ -37,13 +37,15 @@
 
 -include("basho_bench.hrl").
 
--record(state, { ops,
-                 start_time = os:timestamp(),
-                 last_write_time = os:timestamp(),
-                 report_interval,
-                 errors_since_last_report = false,
-                 stats_writer, stats_writer_data,
-                 last_warn = {0,0,0}}).
+-record(state, {
+    ops,
+    start_time = os:timestamp(),
+    last_write_time = os:timestamp(),
+    report_interval,
+    errors_since_last_report = false,
+    stats_writer, stats_writer_data,
+    last_warn = {0,0,0}
+}).
 
 -define(WARN_INTERVAL, 1000). % Warn once a second
 %% ====================================================================
@@ -99,11 +101,11 @@ init([]) ->
     Ops = get_active_ops(),
 
     %% Get the list of measurements we'll be using for this test
-    F2 =
+    Measurements = lists:map(
         fun({MeasurementTag, _IntervalMS}) -> {MeasurementTag, MeasurementTag};
            ({Label, MeasurementTag, _IntervalMS}) -> {Label, MeasurementTag}
-        end,
-    Measurements = [F2(X) || X <- basho_bench_config:get(measurements, [])],
+        end, basho_bench_config:get(measurements, [])
+    ),
 
     %% Setup a histogram and counter for each operation -- we only track latencies on
     %% successful operations
@@ -312,6 +314,7 @@ consume_report_msgs() ->
             ok
     end.
 
+
 % Assuming all stats sink modules are prefixed with basho_bench_stats_writer_
 normalize_name(StatsSink) when is_atom(StatsSink) ->
     {ok, list_to_atom("basho_bench_stats_writer_" ++ atom_to_list(StatsSink))};
@@ -331,16 +334,15 @@ get_active_ops() ->
    case Workers of 
        %% No workers reverts to original case is fine as long as we stick with 2-tuples
        [] -> 
-           F1 =
-               fun({OpTag, _Count}) -> {OpTag, OpTag};
-                  ({Label, OpTag, _Count}) -> {Label, OpTag};
-                  ({Label, OpTag, _Count, _OptionsList}) -> {Label, OpTag}
-               end,
-           [F1(X) || X <- basho_bench_config:get(operations, [])];
-
+            lists:map(
+                fun({OpTag, _Count}) -> {OpTag, OpTag};
+                    ({Label, OpTag, _Count}) -> {Label, OpTag};
+                    ({Label, OpTag, _Count, _OptionsList}) -> {Label, OpTag}
+                end, basho_bench_config:get(operations, []));
         _ -> 
-           get_worker_ops(Workers, basho_bench_config:get(worker_types), [])
+            get_worker_ops(Workers, basho_bench_config:get(worker_types), [])
     end.
+
 
 get_worker_ops([],_WorkerTypes, ACC) ->
      ACC;
@@ -353,22 +355,22 @@ get_worker_ops(Workers, WorkerTypes, ACC) ->
 
      %%TODO: Not sure why the 2-tuples are needed here but they are 
      %%TODO: Not sure about how Label is intended for use either
-     F1 =
+     Ops = lists:map(
         fun({OpTag, _Count2}) -> 
                 { worker_op_name(WorkerType,OpTag), worker_op_name(WorkerType,OpTag)};
            ({Label, OpTag, _Count2}) -> 
                 { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)};
            ({Label, OpTag, __ount, _OptionsList}) -> 
                 { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)}
-        end,
-     Ops = [F1(X) || X <- WorkerOps],
+        end, WorkerOps),
      get_worker_ops(RestWorkers, WorkerTypes, ACC++Ops).
+
 
 %% QUESTION: Generating atoms is not ideal - better way to handle this ? Needed for stats output too
 worker_op_name(Worker,Op) ->
-    Sep="_",
     case Worker of 
-        no_workers -> Op;
+        no_workers ->
+            Op;
         _ ->
-            list_to_atom(atom_to_list(Worker)++Sep++atom_to_list(Op))
+            list_to_atom(atom_to_list(Worker) ++ "_" ++ atom_to_list(Op))
     end.
