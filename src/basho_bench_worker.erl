@@ -29,8 +29,7 @@
          run/1,
          stop/1,
          config_get/1, config_get/2, config_get/3,
-         get_local_config/0,
-         lookup_value/2, lookup_value/3
+         get_local_config/0
 ]).
 
 %% gen_server callbacks
@@ -254,6 +253,10 @@ config_get(Key, Default, LocalConfig) ->
             Value
     end.
 
+%% ====================================================================
+%% Internal functions
+%% ====================================================================
+
 %% lookup_value finds a given {Key,Value} pair in a provided list or returns undefined
 lookup_value(Key, Default, LocalConfig) ->
     case Value = lookup_value(Key, LocalConfig) of
@@ -276,19 +279,6 @@ lookup_value(Key, [Term | Tail]) ->
             lookup_value(Key,Tail)
     end.
 
-publish_config([]) ->
-    ?DEBUG("publish_config []~n", []),
-    ok;
-publish_config([{Key,Value} | RestConfig]) ->
-    ?DEBUG("publish_config Key=~p Value=~p (Pid ~p)~n", [Key, Value, self()]),
-    erlang:put(Key,Value),
-    ?DEBUG("publish_config check - value=~p~n", [erlang:get(Key)]),
-    publish_config(RestConfig).
-
-
-%% ====================================================================
-%% Internal functions
-%% ====================================================================
 
 %%
 %% Expand operations list into tuple suitable for weighted, random draw
@@ -337,7 +327,7 @@ worker_init(State) ->
     %% gets a chance to cleanup
     ?DEBUG("worker_init~n", []),
     process_flag(trap_exit, true),
-    ?DEBUG("calling publish_config ~n", []),
+    ?DEBUG("saving local config to the process dictionary", []),
     erlang:put(local_config, State#state.local_config),
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
