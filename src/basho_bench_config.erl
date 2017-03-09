@@ -28,24 +28,38 @@
 -compile(export_all).
 -endif.
 
--export([load/1,
-         normalize_ips/2,
-         set/2,
-         get/1, get/2,
-         next_worker/0]).
+-export([
+    load/1,
+    normalize_ips/2,
+    set/2,
+    get/1,
+    get/2,
+    next_worker/0
+]).
 
 -export([start_link/0]).
 
 % Gen server callbacks
--export([code_change/3, init/1, terminate/2, handle_call/3, handle_cast/2, handle_info/2]).
+-export([
+    code_change/3,
+    init/1,
+    terminate/2,
+    handle_call/3,
+    handle_cast/2,
+    handle_info/2
+]).
+
 
 -include("basho_bench.hrl").
 
--record(basho_bench_config_state, {
+
+-record(config_state, {
     workers
 }).
 
--type state() :: #basho_bench_config_state{}.
+
+-type state() :: #config_state{}.
+
 %% ===================================================================
 %% Public API
 %% ===================================================================
@@ -54,6 +68,7 @@
 ensure_started() -> 
     start_link().
 
+
 start_link() ->
     gen_server:start_link({global, ?MODULE}, ?MODULE, [], []).
 
@@ -61,9 +76,11 @@ start_link() ->
 load(Files) ->
     ensure_started(),
     gen_server:call({global, ?MODULE}, {load_files, Files}). 
-    
+
+
 set(Key, Value) ->
     gen_server:call({global, ?MODULE}, {set, Key, Value}).
+
 
 get(Key) ->
     case gen_server:call({global, ?MODULE}, {get, Key}) of
@@ -73,6 +90,7 @@ get(Key) ->
             erlang:error("Missing configuration key", [Key])
     end.
 
+
 get(Key, Default) ->
     case gen_server:call({global, ?MODULE}, {get, Key}) of
         {ok, Value} ->
@@ -81,8 +99,10 @@ get(Key, Default) ->
             Default
     end.
 
+
 next_worker() ->
     gen_server:call({global, ?MODULE}, {next_worker}).
+
 
 %% @doc Normalize the list of IPs and Ports.
 %%
@@ -95,13 +115,10 @@ next_worker() ->
 %%     {"127.0.0.1", 8092},
 %%     {"127.0.0.1", 8093}]
 normalize_ips(IPs, DefultPort) ->
-    F = fun(Entry, Acc) ->
+    lists:foldl(
+        fun(Entry, Acc) ->
                 normalize_ip_entry(Entry, Acc, DefultPort)
-        end,
-    lists:foldl(F, [], IPs).
-
-
-
+        end, [], IPs).
 
 
 %% ===================================================================
@@ -123,52 +140,58 @@ normalize_ip_entry(IP, Normalized, DefaultPort) ->
 
 -spec init(term()) -> {ok, state()}.  
 init(_Args) ->
-    State = #basho_bench_config_state{ workers=[]},
+    State = #config_state{ workers=[]},
     {ok, State}.
+
 
 -spec code_change(term(), state(), term()) -> {ok, state()}.
 code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.                                
+    {ok, State}.
+
 
 -spec terminate(term(), state()) -> 'ok'.
 terminate(_Reason, _State) ->
     ok.
 
+
 handle_call({load_files, FileNames}, _From, State) ->
     set_keys_from_files(FileNames),
     {reply, ok, State};
 
+
 handle_call({set, Key, Value}, _From, State) ->
     application:set_env(basho_bench, Key, Value), 
     {reply, ok, State};
+
 handle_call({get, Key}, _From, State) ->
     Value = application:get_env(basho_bench, Key),
     {reply, Value, State};
 
-handle_call({next_worker}, From, #basho_bench_config_state{workers=Workers}=State) ->
+handle_call({next_worker}, From, #config_state{workers=Workers}=State) ->
     case Workers of 
         %% Load Workers the first time or when we've exhausted the list and need to refill it
         [] -> 
             NewWorkers = workers_tuple(),
             ?DEBUG("next_worker reload ~p~n", [NewWorkers]),
-            handle_call({next_worker}, From, State#basho_bench_config_state{workers=NewWorkers});
-
+            handle_call({next_worker}, From, State#config_state{workers=NewWorkers});
         %% Failed first load will set state to no_workers to avoid trying to load the list again
         no_workers -> 
             {reply, no_workers, State};
-
         %% Pop first element of list 
         _ -> 
             [ Worker | NewWorkers ] = Workers,
             ?DEBUG("next_worker Worker ~p~n", [Worker]),
-            {reply, Worker, State#basho_bench_config_state{workers=NewWorkers}}
+            {reply, Worker, State#config_state{workers=NewWorkers}}
     end.
+
 
 handle_cast(_Cast, State) ->
     {noreply, State}.
 
+
 handle_info(_Info, State) ->
     {noreply, State}.
+
 
 set_keys_from_files(Files) ->
     KVs = [ 
@@ -182,6 +205,7 @@ set_keys_from_files(Files) ->
     end || File <- Files ],
     FlatKVs = lists:flatten(KVs),
     [application:set_env(basho_bench, Key, Value) || {Key, Value} <- FlatKVs].
+
 
 %%
 %% Expand worker types list into tuple suitable for weighted, random draw
