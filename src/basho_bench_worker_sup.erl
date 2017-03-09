@@ -59,18 +59,34 @@ init([]) ->
     %% Get the number concurrent workers we're expecting and generate child
     %% specs for each
 
-    basho_bench_profiler:maybe_start_profiler(basho_bench_config:get(enable_profiler, false)),
-    Workers = worker_specs(basho_bench_config:get(concurrent), []),
-    {ok, {{one_for_one, 5, 10}, Workers}}.
+    %% intentionally left in to show where worker profiling start/stop calls go.
+    %% eprof:start(),
+    %% eprof:start_profiling([self()]),
+
+    Workers = basho_bench_config:get(workers),
+    WorkerTypes = basho_bench_config:get(worker_types, []),
+    WorkerConfs = lists:map(
+        fun({WT, Count}) ->
+            {WT, Count, proplists:get_value(WT, WorkerTypes, [])}
+        end, Workers),
+    WorkerSpecs = worker_specs(WorkerConfs, []),
+    {ok, {{one_for_one, 5, 10}, WorkerSpecs}}.
 
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
 
-worker_specs(0, Acc) ->
+worker_specs([], Acc) ->
     Acc;
-worker_specs(Count, Acc) ->
-    Id = list_to_atom(lists:concat(['basho_bench_worker_', Count])),
-    Spec = {Id, {basho_bench_worker, start_link, [Id, Count]},
-            transient, 5000, worker, [basho_bench_worker]},
-    worker_specs(Count-1, [Spec | Acc]).
+worker_specs([WorkerType, Count, Conf} | Rest], Acc0) ->
+    Acc = lists:foldl(
+        fun(I, AccP) ->
+            Id = list_to_atom(lists:concat(
+                ['basho_bench_worker_', WorkerType, '_', I])),
+            Spec = {
+                Id,
+                {basho_bench_worker, start_link, [Id, {WorkerType, I}, Conf]},
+                transient, 5000, worker, [basho_bench_worker]},
+            [Spec | AccP]
+        end, lists:seq(1, Count), Acc0),
+    worker_specs(Rest, Acc).

@@ -34,7 +34,7 @@
     set/2,
     get/1,
     get/2,
-    next_worker/0
+    set_local_config/1
 ]).
 
 -export([start_link/0]).
@@ -83,25 +83,37 @@ set(Key, Value) ->
 
 
 get(Key) ->
-    case gen_server:call({global, ?MODULE}, {get, Key}) of
-        {ok, Value} ->
-            Value;
+    case get_local_config(Key) of
         undefined ->
-            erlang:error("Missing configuration key", [Key])
+            case get_global_config(Key) of
+                {ok, Value} ->
+                    Value;
+                undefined ->
+                    erlang:error("Missing configuration key", [Key])
+            end;
+        {ok, Value} ->
+            Value
     end.
 
 
 get(Key, Default) ->
-    case gen_server:call({global, ?MODULE}, {get, Key}) of
-        {ok, Value} ->
-            Value;
+    case get_local_config(Key) of
         undefined ->
-            Default
+            case get_global_config(Key) of
+                {ok, Value} ->
+                    Value;
+                undefined ->
+                    Default
+            end;
+        {ok, Value} ->
+            Value
     end.
 
 
-next_worker() ->
-    gen_server:call({global, ?MODULE}, {next_worker}).
+set_local_config(LocalConfig) when is_list(LocalConfig) ->
+    set_local_config(maps:from_list(LocalConfig));
+set_local_config(LocalConfig) when is_map(LocalConfig) ->
+    put(local_config, LocalConfig).
 
 
 %% @doc Normalize the list of IPs and Ports.
@@ -124,6 +136,25 @@ normalize_ips(IPs, DefultPort) ->
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
+
+get_local_config(Key) ->
+    get_local_config(Key, undefined).
+
+
+get_local_config(Key, Default) ->
+    case get(local_config) of
+        undefined ->
+            undefined;
+        Conf ->
+            case maps:get(Key, Conf, undefined) of
+                undefined -> undefined;
+                Value -> {ok, Value}
+            end
+    end.
+
+
+get_global_config(Key) ->
+    gen_server:call({global, ?MODULE}, {get, Key}).
 
 
 normalize_ip_entry({IP, Ports}, Normalized, _) when is_list(Ports) ->
@@ -165,24 +196,7 @@ handle_call({set, Key, Value}, _From, State) ->
 
 handle_call({get, Key}, _From, State) ->
     Value = application:get_env(basho_bench, Key),
-    {reply, Value, State};
-
-handle_call({next_worker}, From, #config_state{workers=Workers}=State) ->
-    case Workers of 
-        %% Load Workers the first time or when we've exhausted the list and need to refill it
-        [] -> 
-            NewWorkers = workers_tuple(),
-            ?DEBUG("next_worker reload ~p~n", [NewWorkers]),
-            handle_call({next_worker}, From, State#config_state{workers=NewWorkers});
-        %% Failed first load will set state to no_workers to avoid trying to load the list again
-        no_workers -> 
-            {reply, no_workers, State};
-        %% Pop first element of list 
-        _ -> 
-            [ Worker | NewWorkers ] = Workers,
-            ?DEBUG("next_worker Worker ~p~n", [Worker]),
-            {reply, Worker, State#config_state{workers=NewWorkers}}
-    end.
+    {reply, Value, State}.
 
 
 handle_cast(_Cast, State) ->

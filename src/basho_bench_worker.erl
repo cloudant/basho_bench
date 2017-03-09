@@ -27,9 +27,7 @@
 -export([start_link/2,
          start_link_local/2,
          run/1,
-         stop/1,
-         config_get/1, config_get/2, config_get/3,
-         lookup_value/2, lookup_value/3
+         stop/1
 ]).
 
 %% gen_server callbacks
@@ -89,7 +87,7 @@ stop(Pids) ->
 %% gen_server callbacks
 %% ====================================================================
 
-init([SupChild, Id]) ->
+init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     %% If workers are being used, WorkerType will be set to next needed type
     %% and LocalConfig will be set from the associated config in worker_types
     WorkerType = basho_bench_config:next_worker(),
@@ -122,17 +120,25 @@ init([SupChild, Id]) ->
 
     RngSeed = {A1+Id, A2+Id, A3+Id},
 
+    %% Set local worker config
+    basho_bench_config:set_local_config(WorkerConfig),
+
     %% Pull all config settings from environment
-    Driver  = config_get(driver, LocalConfig),
-    Operations = config_get(operations, LocalConfig),
+    Driver  = basho_bench_config:get(driver),
+    Operations = basho_bench_config:get(operations),
     Ops     = ops_tuple(Operations),
-    ShutdownOnError = config_get(shutdown_on_error, false, LocalConfig),
+    ShutdownOnError = basho_bench_config:get(shutdown_on_error, false),
 
     %% Finally, initialize key and value generation. We pass in our ID to the
     %% initialization to enable (optional) key/value space partitioning
-    KeyGen = basho_bench_keygen:new(config_get(key_generator, LocalConfig), Id),
-    ValGen = basho_bench_valgen:new(config_get(value_generator, LocalConfig), Id),
+    KeyGen = basho_bench_keygen:new(basho_bench_config:get(key_generator), Id),
+    ValGen = basho_bench_valgen:new(basho_bench_config:get(value_generator), Id),
 
+    %% TODO: either fix ops_configs or remove it
+    %% I think the idea here was to allow specifying keygens in the `operations`
+    %% field for each of the ops. For instance, allowing you to specify a
+    %% different KeyGen for doc_get vs view_get, but this is not currently
+    %% detailed in the new config spec.
     OptionsConfigs = ops_configs(Id, Operations),
     %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
     State0 = #state { id = Id,
@@ -140,7 +146,7 @@ init([SupChild, Id]) ->
                      keygen = KeyGen,
                      valgen = ValGen,
                      driver = Driver,
-                     local_config = LocalConfig,
+                     local_config = WorkerConfig,
                      worker_type = WorkerType,
                      shutdown_on_error = ShutdownOnError,
                      ops = Ops, ops_len = size(Ops),
@@ -213,67 +219,6 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% ====================================================================
-%% Additional Exported Functions
-%% ====================================================================
-
-%% get works with either LocalConfig list or #state.local_config in provided State
-%% if value is not found in LocalConfig list then basho_bench_config:get is called
-%% if no value is found and no default is provided, returns an error
-
-config_get(Key) ->
-    config_get(Key, undefined, []).
-
-config_get(Key, #state{local_config=LocalConfig}) ->
-    config_get(Key, undefined, LocalConfig);
-config_get(Key, LocalConfig) ->
-    config_get(Key, undefined, LocalConfig).
-
-config_get(Key, Default, #state{local_config=LocalConfig}) ->
-   config_get(Key, Default, LocalConfig);
-config_get(Key, Default, LocalConfig) ->
-    Value =
-        case V = erlang:get(Key) of
-            undefined ->
-                lookup_value(Key, LocalConfig);
-            _ -> V
-        end,
-    case Value of
-        undefined ->
-            basho_bench_config:get(Key,Default);
-        _ ->
-            Value
-    end.
-
-%% lookup_value finds a given {Key,Value} pair in a provided list or returns undefined
-lookup_value(Key, Default, LocalConfig) ->
-    case Value = lookup_value(Key, LocalConfig) of
-        undefined ->
-            Default;
-         _ ->
-            Value
-    end.
-
-lookup_value(_Key, undefined) ->
-    undefined;
-lookup_value(_Key, []) ->
-    undefined;
-lookup_value(Key, [Term | Tail]) ->
-    {K,V} = Term,
-    case K =:= Key of
-        true ->
-            V;
-        _ ->
-            lookup_value(Key,Tail)
-    end.
-
-publish_config([]) ->
-    ok;
-publish_config([{Key,Value} | RestConfig]) ->
-    erlang:put(Key,Value),
-    publish_config(RestConfig).
-
-
-%% ====================================================================
 %% Internal functions
 %% ====================================================================
 
@@ -323,7 +268,9 @@ worker_init(State) ->
     %% Trap exits from linked parent process; use this to ensure the driver
     %% gets a chance to cleanup
     process_flag(trap_exit, true),
-    publish_config(State#state.local_config),
+    %% Set local worker config
+    basho_bench_config:set_local_config(State#state.local_config),
+
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
 
