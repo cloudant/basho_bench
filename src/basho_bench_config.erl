@@ -113,7 +113,7 @@ get(Key, Default) ->
 set_local_config(LocalConfig) when is_list(LocalConfig) ->
     set_local_config(maps:from_list(LocalConfig));
 set_local_config(LocalConfig) when is_map(LocalConfig) ->
-    put(local_config, LocalConfig).
+    erlang:put(local_config, LocalConfig).
 
 
 %% @doc Normalize the list of IPs and Ports.
@@ -142,12 +142,12 @@ get_local_config(Key) ->
 
 
 get_local_config(Key, Default) ->
-    case get(local_config) of
+    case erlang:get(local_config) of
         undefined ->
-            undefined;
+            Default;
         Conf ->
             case maps:get(Key, Conf, undefined) of
-                undefined -> undefined;
+                undefined -> Default;
                 Value -> {ok, Value}
             end
     end.
@@ -219,26 +219,3 @@ set_keys_from_files(Files) ->
     end || File <- Files ],
     FlatKVs = lists:flatten(KVs),
     [application:set_env(basho_bench, Key, Value) || {Key, Value} <- FlatKVs].
-
-
-%%
-%% Expand worker types list into tuple suitable for weighted, random draw
-%% TODO: better later if randomized order or randomized draw
-%%
-
-workers_tuple() ->
-    %% WorkersConfig = basho_bench_config:get(workers, []),
-    %% get isn't working at this point in initializaton for some reason but raw get_env does
-
-    WorkersConfig = application:get_env(basho_bench, workers, []),
-    case WorkersConfig of
-        [] ->
-             no_workers;
-
-        _  -> 
-            F = fun({WorkerTag, Count}) ->
-               lists:duplicate(Count, WorkerTag)
-            end,
-            Workers = [F(X) || X <- WorkersConfig],
-            lists:flatten(Workers)
-    end.

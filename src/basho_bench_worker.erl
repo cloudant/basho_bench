@@ -87,11 +87,11 @@ stop(Pids) ->
 %% gen_server callbacks
 %% ====================================================================
 
-init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
+init([SupChild, {WorkerType, WorkerId}=_Id, WorkerConf]) ->
     %% If workers are being used, WorkerType will be set to next needed type
     %% and LocalConfig will be set from the associated config in worker_types
     WorkerType = basho_bench_config:next_worker(),
-    ?DEBUG("init ID ~p WorkerType=~p~n", [Id, WorkerType]),
+    ?DEBUG("init ID ~p WorkerType=~p~n", [WorkerId, WorkerType]),
     LocalConfig =
         case WorkerType of
             no_workers ->
@@ -100,7 +100,7 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
                 % TODO: Improve error reporting,
                 %    but with no worker_types or specific worker defined should complain
                 WorkerTypes = basho_bench_config:get(worker_types),
-                lookup_value(WorkerType, WorkerTypes)
+                proplists:get_value(WorkerType, WorkerTypes)
         end,
 
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
@@ -113,15 +113,15 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     %% and value size generation between test runs.
     process_flag(trap_exit, true),
     {A1, A2, A3} =
-        case config_get(rng_seed, {42, 23, 12}, LocalConfig) of
+        case basho_bench_config:get(rng_seed, {42, 23, 12}, LocalConfig) of
             {Aa, Ab, Ac} -> {Aa, Ab, Ac};
             now -> now()
         end,
 
-    RngSeed = {A1+Id, A2+Id, A3+Id},
+    RngSeed = {A1+WorkerId, A2+WorkerId, A3+WorkerId},
 
     %% Set local worker config
-    basho_bench_config:set_local_config(WorkerConfig),
+    basho_bench_config:set_local_config(WorkerConf),
 
     %% Pull all config settings from environment
     Driver  = basho_bench_config:get(driver),
@@ -131,22 +131,22 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
 
     %% Finally, initialize key and value generation. We pass in our ID to the
     %% initialization to enable (optional) key/value space partitioning
-    KeyGen = basho_bench_keygen:new(basho_bench_config:get(key_generator), Id),
-    ValGen = basho_bench_valgen:new(basho_bench_config:get(value_generator), Id),
+    KeyGen = basho_bench_keygen:new(basho_bench_config:get(key_generator), WorkerId),
+    ValGen = basho_bench_valgen:new(basho_bench_config:get(value_generator), WorkerId),
 
     %% TODO: either fix ops_configs or remove it
     %% I think the idea here was to allow specifying keygens in the `operations`
     %% field for each of the ops. For instance, allowing you to specify a
     %% different KeyGen for doc_get vs view_get, but this is not currently
     %% detailed in the new config spec.
-    OptionsConfigs = ops_configs(Id, Operations),
+    OptionsConfigs = ops_configs(WorkerId, Operations),
     %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
-    State0 = #state { id = Id,
+    State0 = #state { id = WorkerId,
                      api_pass_state = basho_bench_config:get(api_pass_state),
                      keygen = KeyGen,
                      valgen = ValGen,
                      driver = Driver,
-                     local_config = WorkerConfig,
+                     local_config = WorkerConf,
                      worker_type = WorkerType,
                      shutdown_on_error = ShutdownOnError,
                      ops = Ops, ops_len = size(Ops),
@@ -294,7 +294,7 @@ worker_idle_loop(State) ->
             end,
             worker_idle_loop(State#state { driver_state = DriverState });
         run ->
-            case config_get(mode, State) of
+            case basho_bench_config:get(mode, State) of
                 max ->
                     ?INFO("Starting max worker: ~p on ~p~n", [self(), node()]),
                     max_worker_run_loop(State);
@@ -313,9 +313,9 @@ worker_idle_loop(State) ->
 worker_next_op2(#state{api_pass_state=false}=State, OpTag) ->
     catch (State#state.driver):run(OpTag, State#state.keygen, State#state.valgen,State#state.driver_state);
 worker_next_op2(State, OpTag) ->
-   OpConfig = lookup_value(OpTag, State#state.ops_configs),
-   KeyGen = lookup_value(keygen, State#state.keygen, OpConfig),
-   ValueGen = lookup_value(valuegen, State#state.valgen, OpConfig),
+   OpConfig = proplists:get_value(OpTag, State#state.ops_configs),
+   KeyGen = proplists:get_value(keygen, State#state.keygen, OpConfig),
+   ValueGen = proplists:get_value(valuegen, State#state.valgen, OpConfig),
    catch (State#state.driver):run(OpTag, KeyGen, ValueGen,
                                   State#state.driver_state).
 

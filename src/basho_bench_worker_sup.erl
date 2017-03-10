@@ -65,6 +65,7 @@ init([]) ->
 
     Workers = basho_bench_config:get(workers),
     WorkerTypes = basho_bench_config:get(worker_types, []),
+    %% TODO: What happens with existing configs ? Recognize old style also ?
     WorkerConfs = lists:map(
         fun({WT, Count}) ->
             {WT, Count, proplists:get_value(WT, WorkerTypes, [])}
@@ -78,7 +79,7 @@ init([]) ->
 
 worker_specs([], Acc) ->
     Acc;
-worker_specs([WorkerType, Count, Conf} | Rest], Acc0) ->
+worker_specs([{WorkerType, Count, Conf} | Rest], Acc0) ->
     Acc = lists:foldl(
         fun(I, AccP) ->
             Id = list_to_atom(lists:concat(
