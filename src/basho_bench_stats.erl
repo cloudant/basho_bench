@@ -358,6 +358,7 @@ get_active_ops() ->
                     ({Label, OpTag, _Count}) -> {Label, OpTag};
                     ({Label, OpTag, _Count, _OptionsList}) -> {Label, OpTag}
                 end, basho_bench_config:get(operations, []));
+       %% Use workers to determine active worker types for current config
         _ -> 
             get_worker_ops(Workers, basho_bench_config:get(worker_types), [])
     end.
@@ -368,9 +369,9 @@ get_worker_ops([],_WorkerTypes, ACC) ->
 get_worker_ops(Workers, WorkerTypes, ACC) ->
      [ WorkerEntry | RestWorkers ] = Workers,
      {WorkerType, _Count} = WorkerEntry,
-     WorkerConfig = basho_bench_worker:config_get(WorkerType, WorkerTypes),
+     WorkerConfig = proplists:get_value(WorkerType, WorkerTypes),
      %% Get either per-worker ops or global ops
-     WorkerOps = basho_bench_worker:config_get(operations, WorkerConfig),
+     WorkerOps = proplists:get_value(operations, WorkerConfig),
 
      %%TODO: Not sure why the 2-tuples are needed here but they are
      %%TODO: Not sure about how Label is intended for use either
@@ -379,7 +380,7 @@ get_worker_ops(Workers, WorkerTypes, ACC) ->
                 { worker_op_name(WorkerType,OpTag), worker_op_name(WorkerType,OpTag)};
            ({Label, OpTag, _Count2}) ->
                 { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)};
-           ({Label, OpTag, __ount, _OptionsList}) ->
+           ({Label, OpTag, _Count2, _OptionsList}) ->
                 { worker_op_name(WorkerType,Label), worker_op_name(WorkerType,OpTag)}
         end, WorkerOps),
      get_worker_ops(RestWorkers, WorkerTypes, ACC++Ops).

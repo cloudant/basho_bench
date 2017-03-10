@@ -88,10 +88,6 @@ stop(Pids) ->
 %% ====================================================================
 
 init([SupChild, {WorkerType, WorkerId}=_Id, WorkerConf]) ->
-    %% If workers are being used, WorkerType will be set to next needed type
-    %% and LocalConfig will be set from the associated config in worker_types
-    WorkerType = basho_bench_config:next_worker(),
-    ?DEBUG("init ID ~p WorkerType=~p~n", [WorkerId, WorkerType]),
     LocalConfig =
         case WorkerType of
             no_workers ->

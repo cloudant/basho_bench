@@ -65,6 +65,7 @@ init([]) ->
 
     Workers = basho_bench_config:get(workers),
     WorkerTypes = basho_bench_config:get(worker_types, []),
+
     %% TODO: What happens with existing configs ? Recognize old style also ?
     WorkerConfs = lists:map(
         fun({WT, Count}) ->
@@ -88,6 +89,7 @@ worker_specs([{WorkerType, Count, Conf} | Rest], Acc0) ->
                 Id,
                 {basho_bench_worker, start_link, [Id, {WorkerType, I}, Conf]},
                 transient, 5000, worker, [basho_bench_worker]},
-            [Spec | AccP]
-        end, lists:seq(1, Count), Acc0),
-    worker_specs(Rest, Acc).
+            AccP ++ [Spec]
+        end,
+        [], lists:seq(1, Count)),
+    worker_specs(Rest, Acc0 ++ Acc).
