@@ -31,7 +31,8 @@
 -export([load/1,
          normalize_ips/2,
          set/2,
-         get/1, get/2]).
+         get/1, get/2,
+         next_worker/0]).
 
 -export([start_link/0]).
 
@@ -40,7 +41,9 @@
 
 -include("basho_bench.hrl").
 
--record(basho_bench_config_state, {}).
+-record(basho_bench_config_state, {
+    workers
+}).
 
 -type state() :: #basho_bench_config_state{}.
 %% ===================================================================
@@ -77,6 +80,9 @@ get(Key, Default) ->
         undefined ->
             Default
     end.
+
+next_worker() ->
+    gen_server:call({global, ?MODULE}, {next_worker}).
 
 %% @doc Normalize the list of IPs and Ports.
 %%
@@ -117,7 +123,7 @@ normalize_ip_entry(IP, Normalized, DefaultPort) ->
 
 -spec init(term()) -> {ok, state()}.  
 init(_Args) ->
-    State = #basho_bench_config_state{},
+    State = #basho_bench_config_state{ workers=[]},
     {ok, State}.
 
 -spec code_change(term(), state(), term()) -> {ok, state()}.
@@ -135,9 +141,30 @@ handle_call({load_files, FileNames}, _From, State) ->
 handle_call({set, Key, Value}, _From, State) ->
     application:set_env(basho_bench, Key, Value), 
     {reply, ok, State};
-handle_call({get, Key}, _From, State) ->
+handle_call({get, Key}, From, State) ->
+    ?DEBUG("basho_bench_config:handle_call(get, key=~p) From=~p Pid=~p", [Key, From, self()]),
     Value = application:get_env(basho_bench, Key),
-    {reply, Value, State}.
+    {reply, Value, State};
+
+handle_call({next_worker}, From, #basho_bench_config_state{workers=Workers}=State) ->
+    ?DEBUG("handle_call: next_worker", []),
+    case Workers of 
+        %% Load Workers the first time or when we've exhausted the list and need to refill it
+        [] -> 
+            NewWorkers = workers_tuple(),
+            ?DEBUG("next_worker reload ~p~n", [NewWorkers]),
+            handle_call({next_worker}, From, State#basho_bench_config_state{workers=NewWorkers});
+
+        %% Failed first load will set state to no_workers to avoid trying to load the list again
+        no_workers -> 
+            {reply, no_workers, State};
+
+        %% Pop first element of list 
+        _ -> 
+            [ Worker | NewWorkers ] = Workers,
+            ?DEBUG("next_worker Worker ~p~n", [Worker]),
+            {reply, Worker, State#basho_bench_config_state{workers=NewWorkers}}
+    end.
 
 handle_cast(_Cast, State) ->
     {noreply, State}.
@@ -158,3 +185,24 @@ set_keys_from_files(Files) ->
     FlatKVs = lists:flatten(KVs),
     [application:set_env(basho_bench, Key, Value) || {Key, Value} <- FlatKVs].
 
+%%
+%% Expand worker types list into tuple suitable for weighted, random draw
+%% TODO: better later if randomized order or randomized draw
+%%
+
+workers_tuple() ->
+    %% WorkersConfig = basho_bench_config:get(workers, []),
+    %% get isn't working at this point in initializaton for some reason but raw get_env does
+
+    WorkersConfig = application:get_env(basho_bench, workers, []),
+    case WorkersConfig of
+        [] ->
+             no_workers;
+
+        _  -> 
+            F = fun({WorkerTag, Count}) ->
+               lists:duplicate(Count, WorkerTag)
+            end,
+            Workers = [F(X) || X <- WorkersConfig],
+            lists:flatten(Workers)
+    end.
