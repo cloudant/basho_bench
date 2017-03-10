@@ -24,8 +24,8 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2,
-         start_link_local/2,
+-export([start_link/3,
+         start_link_local/3,
          run/1,
          stop/1
 ]).
@@ -60,20 +60,20 @@
 %% API
 %% ====================================================================
 
-start_link(SupChild, Id) ->
+start_link(SupChild, Id, WorkerConf) ->
     case basho_bench_config:get(distribute_work, false) of
         true ->
-            start_link_distributed(SupChild, Id);
+            start_link_distributed(SupChild, Id, WorkerConf);
         false ->
-            start_link_local(SupChild, Id)
+            start_link_local(SupChild, Id, WorkerConf)
     end.
 
-start_link_distributed(SupChild, Id) ->
+start_link_distributed(SupChild, Id, WorkerConf) ->
     Node = pool:get_node(),
-    rpc:block_call(Node, ?MODULE, start_link_local, [SupChild, Id]).
+    rpc:block_call(Node, ?MODULE, start_link_local, [SupChild, Id, WorkerConf]).
 
-start_link_local(SupChild, Id) ->
-    gen_server:start_link(?MODULE, [SupChild, Id], []).
+start_link_local(SupChild, Id, WorkerConf) ->
+    gen_server:start_link(?MODULE, [SupChild, Id, WorkerConf], []).
 
 run(Pids) ->
     [ok = gen_server:call(Pid, run, infinity) || Pid <- Pids],
@@ -87,17 +87,10 @@ stop(Pids) ->
 %% gen_server callbacks
 %% ====================================================================
 
-init([SupChild, {WorkerType, WorkerId}=_Id, WorkerConf]) ->
-    LocalConfig =
-        case WorkerType of
-            no_workers ->
-                [];
-            _ ->
-                % TODO: Improve error reporting,
-                %    but with no worker_types or specific worker defined should complain
-                WorkerTypes = basho_bench_config:get(worker_types),
-                proplists:get_value(WorkerType, WorkerTypes)
-        end,
+init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
+
+    %% Set local worker config
+    basho_bench_config:set_local_config(WorkerConf),
 
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
     %% the worker to ensure consistency in load-gen
@@ -109,15 +102,12 @@ init([SupChild, {WorkerType, WorkerId}=_Id, WorkerConf]) ->
     %% and value size generation between test runs.
     process_flag(trap_exit, true),
     {A1, A2, A3} =
-        case basho_bench_config:get(rng_seed, {42, 23, 12}, LocalConfig) of
+        case basho_bench_config:get(rng_seed, {42, 23, 12}) of
             {Aa, Ab, Ac} -> {Aa, Ab, Ac};
             now -> now()
         end,
 
     RngSeed = {A1+WorkerId, A2+WorkerId, A3+WorkerId},
-
-    %% Set local worker config
-    basho_bench_config:set_local_config(WorkerConf),
 
     %% Pull all config settings from environment
     Driver  = basho_bench_config:get(driver),
@@ -182,7 +172,6 @@ init([SupChild, {WorkerType, WorkerId}=_Id, WorkerConf]) ->
         false ->
             ok
     end,
-
     {ok, State#state { worker_pid = WorkerPid }}.
 
 handle_call(run, _From, State) ->
