@@ -74,6 +74,7 @@ init([]) ->
                 fun({WT, Count}) ->
                     %% TODO: Best way ? 
                     %% Burn in {concurrent, Count} to the WorkerConf
+                    %% Key-generator(sequential) needs to know number of workers sharing that keygen
                     Conf = proplists:get_value(WT, WorkerTypes, []),
 		    Conf2 = proplists:delete(concurrent, Conf),
 		    Conf3 = lists:append(Conf2, [{concurrent, Count}]),

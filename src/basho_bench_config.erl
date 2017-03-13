@@ -83,8 +83,8 @@ set(Key, Value) ->
 
 
 get(Key) ->
-    ?DEBUG("config:get(~p)", [Key]),
-    case get_local_config(Key) of
+    %% TODO: TEMP PRINTING V, remove before final delivery
+    V = case get_local_config(Key) of
         undefined ->
             case get_global_config(Key) of
                 {ok, Value} ->
@@ -94,12 +94,14 @@ get(Key) ->
             end;
         {ok, Value} ->
             Value
-    end.
+    end,
+    ?DEBUG("config:get(~p) => ~p", [Key,V]),
+    V.
 
 
 get(Key, Default) ->
-    ?DEBUG("config:get(~p,~p)", [Key, Default]),
-    case get_local_config(Key) of
+    %% TODO: TEMP PRINTING V, remove before final delivery
+    V = case get_local_config(Key) of
         undefined ->
             case get_global_config(Key) of
                 {ok, Value} ->
@@ -109,7 +111,9 @@ get(Key, Default) ->
             end;
         {ok, Value} ->
             Value
-    end.
+    end,
+    ?DEBUG("config:get(~p,~p) => ~p", [Key, Default, V]),
+    V.
 
 
 set_local_config(LocalConfig) when is_list(LocalConfig) ->

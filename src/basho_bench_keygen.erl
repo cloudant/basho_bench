@@ -102,7 +102,7 @@ new({partitioned_sequential_int, StartKey, NumKeys}, Id)
     Ref = make_ref(),
     DisableProgress =
         basho_bench_config:get(disable_sequential_int_progress_report, false),
-    ?DEBUG("ID ~p generating range ~p to ~p\n", [Id, MinValue, MaxValue]),
+    ?DEBUG("ID ~p generating range ~p to ~p for ~p workers sharing keygen\n", [Id, MinValue, MaxValue, Workers]),
     fun() -> sequential_int_generator(Ref, MaxValue - MinValue, Id, DisableProgress) + MinValue end;
 new({uniform_int, MaxKey}, _Id)
   when is_integer(MaxKey), MaxKey > 0 ->
@@ -268,6 +268,7 @@ seq_gen_write_resume_value(Id, Value) ->
             Bin = term_to_binary(Value),
             ok = file:write_file(OutFileTmp, Bin),
             {ok, Bin} = file:read_file(OutFileTmp),
+            ?DEBUG("keygen:seq_gen_write_resume_value to file ~p", [OutFileTmp]),
             ok = file:rename(OutFileTmp, OutFile)
     end.
 
@@ -278,6 +279,7 @@ seq_gen_read_resume_value(Id, MaxValue) ->
         Path ->
             try
                 InFile = Path ++ "/" ++ integer_to_list(Id),
+                ?DEBUG("keygen:seq_gen_read_resume_value to file ~p", [InFile]),
                 {ok, Bin} = file:read_file(InFile),
                 Value = binary_to_term(Bin),
             case Value > MaxValue of
@@ -306,6 +308,7 @@ seq_gen_state_dir(Id) ->
         {_Dir, false} ->
             "";
         {[$/|_] = Dir, true} ->
+            ?DEBUG("keygen:seq_gen_state_dir Dir ~p", [Dir]),
             Dir;
         {[$/|_] = Dir, undefined} ->
             case filelib:ensure_dir(filename:join(Dir, "touch")) of
