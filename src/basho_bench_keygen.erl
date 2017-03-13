@@ -301,6 +301,7 @@ seq_gen_read_resume_value(Id, MaxValue) ->
 seq_gen_state_dir(Id) ->
     Key = sequential_int_state_dir,
     DirValid = get(seq_dir_test_res),
+    ?DEBUG("keygen:seq_gen_state_dir ~p", [Id]),
     case {basho_bench_config:get(Key, "") , DirValid} of
         {_Dir, false} ->
             "";
