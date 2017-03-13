@@ -327,7 +327,6 @@ worker_next_op(State) ->
     %%TODO: May WORK but ugly/horrible way to apply worker_type name so revisit
     OpName = { basho_bench_stats:worker_op_name(State#state.worker_type, Label),
                basho_bench_stats:worker_op_name(State#state.worker_type, OpTag)},
-    ?DEBUG("worker:worker_next_op OpName ~p", [OpName]),
     case Result of
         {Res, DriverState} when Res == ok orelse element(1, Res) == ok ->
             basho_bench_stats:op_complete(OpName, Res, ElapsedUs),
