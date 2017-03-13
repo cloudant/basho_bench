@@ -136,7 +136,7 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     %% detailed in the new config spec.
     OptionsConfigs = ops_configs(WorkerId, Operations),
     %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
-    State0 = #state { id = WorkerId,
+    State0 = #state { id = Id,
                      api_pass_state = basho_bench_config:get(api_pass_state),
                      keygen = KeyGen,
                      valgen = ValGen,
