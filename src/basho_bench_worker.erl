@@ -61,6 +61,7 @@
 %% ====================================================================
 
 start_link(SupChild, Id, WorkerConf) ->
+    ?DEBUG("worker:start_link(~p, ~p, ~p)", [SupChild, Id, WorkerConf]),
     case basho_bench_config:get(distribute_work, false) of
         true ->
             start_link_distributed(SupChild, Id, WorkerConf);
@@ -69,10 +70,12 @@ start_link(SupChild, Id, WorkerConf) ->
     end.
 
 start_link_distributed(SupChild, Id, WorkerConf) ->
+    ?DEBUG("worker:start_link(~p, ~p, ~p)", [SupChild, Id, WorkerConf]),
     Node = pool:get_node(),
     rpc:block_call(Node, ?MODULE, start_link_local, [SupChild, Id, WorkerConf]).
 
 start_link_local(SupChild, Id, WorkerConf) ->
+    ?DEBUG("worker:start_link(~p, ~p, ~p)", [SupChild, Id, WorkerConf]),
     gen_server:start_link(?MODULE, [SupChild, Id, WorkerConf], []).
 
 run(Pids) ->
@@ -88,9 +91,12 @@ stop(Pids) ->
 %% ====================================================================
 
 init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
+    ?DEBUG("init ID ~p WorkerType=~p~n    WorkerConf=~p", [WorkerId, WorkerType, WorkerConf]),
 
     %% Set local worker config
+    ?DEBUG("worker:init - setting local_config set to ~p", [WorkerConf]),
     basho_bench_config:set_local_config(WorkerConf),
+    ?DEBUG("worker:init - local_config set to WorkerConf", []),
 
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
     %% the worker to ensure consistency in load-gen
@@ -108,6 +114,7 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
         end,
 
     RngSeed = {A1+WorkerId, A2+WorkerId, A3+WorkerId},
+    ?DEBUG("worker:init - RngSeed set", []),
 
     %% Pull all config settings from environment
     Driver  = basho_bench_config:get(driver),
@@ -120,6 +127,8 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     KeyGen = basho_bench_keygen:new(basho_bench_config:get(key_generator), WorkerId),
     ValGen = basho_bench_valgen:new(basho_bench_config:get(value_generator), WorkerId),
 
+    ?DEBUG("worker:init - Got Driver, Ops, Gens, etc", []),
+    
     %% TODO: either fix ops_configs or remove it
     %% I think the idea here was to allow specifying keygens in the `operations`
     %% field for each of the ops. For instance, allowing you to specify a
@@ -144,6 +153,8 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     %% Finally, initialize key and value generation. We pass in our ID to the
     %% initialization to enable (optional) key/value space partitioning
     State = add_generators(State0),
+
+    ?DEBUG("worker:init - State set", []),
 
     %% Use a dedicated sub-process to do the actual work. The work loop may need
     %% to sleep or otherwise delay in a way that would be inappropriate and/or
@@ -172,6 +183,7 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
         false ->
             ok
     end,
+    ?DEBUG("worker:init - end", []),
     {ok, State#state { worker_pid = WorkerPid }}.
 
 handle_call(run, _From, State) ->
@@ -211,6 +223,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% Expand operations list into tuple suitable for weighted, random draw
 %%
 ops_tuple(Operations) ->
+    ?DEBUG("worker:ops_tuple(~p)", Operations),
     F =
         fun({OpTag, Count}) ->
                 lists:duplicate(Count, {OpTag, OpTag});

@@ -349,6 +349,7 @@ normalize_name(StatsSink) -> {error, {StatsSink, invalid_name}}.
 % TODO: Understand how undocumented Labels are being used
 
 get_active_ops() ->
+   ?DEBUG("stats:get_active_ops",[]),
    Workers = basho_bench_config:get(workers, []),
    case Workers of
        %% No workers reverts to original case is fine as long as we stick with 2-tuples
@@ -365,6 +366,7 @@ get_active_ops() ->
 
 
 get_worker_ops([],_WorkerTypes, ACC) ->
+     ?DEBUG("stats:get_worker_ops: ~p", [ACC]),
      ACC;
 get_worker_ops(Workers, WorkerTypes, ACC) ->
      [ WorkerEntry | RestWorkers ] = Workers,

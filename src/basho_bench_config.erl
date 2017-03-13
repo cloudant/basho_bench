@@ -83,6 +83,7 @@ set(Key, Value) ->
 
 
 get(Key) ->
+    ?DEBUG("config:get(~p)", [Key]),
     case get_local_config(Key) of
         undefined ->
             case get_global_config(Key) of
@@ -97,6 +98,7 @@ get(Key) ->
 
 
 get(Key, Default) ->
+    ?DEBUG("config:get(~p,~p)", [Key, Default]),
     case get_local_config(Key) of
         undefined ->
             case get_global_config(Key) of
@@ -111,8 +113,15 @@ get(Key, Default) ->
 
 
 set_local_config(LocalConfig) when is_list(LocalConfig) ->
-    set_local_config(maps:from_list(LocalConfig));
+    ?DEBUG("config:set_local_config(~p)", [LocalConfig]),
+    ?DEBUG("maps module_info: ~p", [maps:module_info()]),
+    Map0 = maps:from_list([{a, 1}, {b, 2}]),
+    ?DEBUG("config:set_local_config Map0=~p", [Map0]),
+    Map = maps:from_list(LocalConfig),
+    ?DEBUG("config:set_local_config Map=~p", [Map]),
+    set_local_config(Map);
 set_local_config(LocalConfig) when is_map(LocalConfig) ->
+    ?DEBUG("config:set_local_config(~p)", [LocalConfig]),
     erlang:put(local_config, LocalConfig).
 
 
