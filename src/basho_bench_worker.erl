@@ -426,8 +426,9 @@ rate_worker_run_loop(State, Lambda) ->
     end.
 
 add_generators(#state{api_pass_state = ApiPassState,id=Id}=State) ->
-    KeyGen = init_generators(ApiPassState, basho_bench_config:get(key_generator), Id, basho_bench_keygen),
-    ValGen = init_generators(ApiPassState, basho_bench_config:get(value_generator), Id, basho_bench_valgen),
+    {_WorkerType, WorkerId} = Id,
+    KeyGen = init_generators(ApiPassState, basho_bench_config:get(key_generator), WorkerId, basho_bench_keygen),
+    ValGen = init_generators(ApiPassState, basho_bench_config:get(value_generator), WorkerId, basho_bench_valgen),
     State#state{keygen=KeyGen, valgen=ValGen}.
 
 %% Not passing state API - expect non-list spec or error during new attempt

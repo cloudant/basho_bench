@@ -72,7 +72,12 @@ init([]) ->
         _ -> 
             WorkerConfs = lists:map(
                 fun({WT, Count}) ->
-                    {WT, Count, proplists:get_value(WT, WorkerTypes, [])}
+                    %% TODO: Best way ? 
+                    %% Burn in {concurrent, Count} to the WorkerConf
+                    Conf = proplists:get_value(WT, WorkerTypes, []),
+		    Conf2 = proplists:delete(concurrent, Conf),
+		    Conf3 = lists:append(Conf2, [{concurrent, Count}]),
+                    {WT, Count, Conf3 }
                 end, Workers),
             WorkerSpecs = worker_specs_multi(WorkerConfs, []),
            {ok, {{one_for_one, 5, 10}, WorkerSpecs}}
