@@ -126,7 +126,7 @@ map_from_list(List) ->
 map_from_list([], Map) ->
     Map;
 map_from_list([{K, V} | Rest], Map) ->
-    map_from_list(Rest, Map#{K => V}).
+    map_from_list(Rest, maps:put(K, V, Map)).
 
 
 %% @doc Normalize the list of IPs and Ports.
