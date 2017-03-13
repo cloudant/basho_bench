@@ -116,9 +116,8 @@ set_local_config(LocalConfig) when is_list(LocalConfig) ->
     Map = map_from_list(LocalConfig),
     set_local_config(Map);
 set_local_config(LocalConfig) when is_map(LocalConfig) ->
-    io:format("config:set_local_config(~p)", [LocalConfig]),
-    erlang:put(local_config, LocalConfig),
-    io:format("after put").
+    ?DEBUG("config:set_local_config(~p)", [LocalConfig]),
+    erlang:put(local_config, LocalConfig).
 
 %% TODO: Change to maps:from_list(List) in Erlang 18
 map_from_list(List) ->
