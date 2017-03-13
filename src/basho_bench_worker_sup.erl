@@ -59,28 +59,41 @@ init([]) ->
     %% Get the number concurrent workers we're expecting and generate child
     %% specs for each
 
-    %% intentionally left in to show where worker profiling start/stop calls go.
-    %% eprof:start(),
-    %% eprof:start_profiling([self()]),
+    basho_bench_profiler:maybe_start_profiler(basho_bench_config:get(enable_profiler, false)),
 
-    Workers = basho_bench_config:get(workers),
+    Workers = basho_bench_config:get(workers, []),
     WorkerTypes = basho_bench_config:get(worker_types, []),
 
-    %% TODO: What happens with existing configs ? Recognize old style also ?
-    WorkerConfs = lists:map(
-        fun({WT, Count}) ->
-            {WT, Count, proplists:get_value(WT, WorkerTypes, [])}
-        end, Workers),
-    WorkerSpecs = worker_specs(WorkerConfs, []),
-    {ok, {{one_for_one, 5, 10}, WorkerSpecs}}.
+    case Workers of
+        [] -> 
+            WorkerSpecs = worker_specs(basho_bench_config:get(concurrent), []),
+            {ok, {{one_for_one, 5, 10}, WorkerSpecs}};
+
+        _ -> 
+            WorkerConfs = lists:map(
+                fun({WT, Count}) ->
+                    {WT, Count, proplists:get_value(WT, WorkerTypes, [])}
+                end, Workers),
+            WorkerSpecs = worker_specs_multi(WorkerConfs, []),
+           {ok, {{one_for_one, 5, 10}, WorkerSpecs}}
+    end.
 
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
 
-worker_specs([], Acc) ->
+worker_specs(0, Acc) ->
     Acc;
-worker_specs([{WorkerType, Count, Conf} | Rest], Acc0) ->
+worker_specs(Count, Acc) ->
+    Id = list_to_atom(lists:concat(['basho_bench_worker_', Count])),
+    %% Use "single" atom for non-workers (?)
+    Spec = {Id, {basho_bench_worker, start_link, [Id, {single, Count}, []]},
+                 transient, 5000, worker, [basho_bench_worker]},
+    worker_specs(Count-1, [Spec | Acc]).
+
+worker_specs_multi([], Acc) ->
+    Acc;
+worker_specs_multi([{WorkerType, Count, Conf} | Rest], Acc0) ->
     Acc = lists:foldl(
         fun(I, AccP) ->
             Id = list_to_atom(lists:concat(
@@ -92,4 +105,4 @@ worker_specs([{WorkerType, Count, Conf} | Rest], Acc0) ->
             AccP ++ [Spec]
         end,
         [], lists:seq(1, Count)),
-    worker_specs(Rest, Acc0 ++ Acc).
+    worker_specs_multi(Rest, Acc0 ++ Acc).
