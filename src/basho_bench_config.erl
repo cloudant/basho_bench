@@ -113,16 +113,21 @@ get(Key, Default) ->
 
 
 set_local_config(LocalConfig) when is_list(LocalConfig) ->
-    ?DEBUG("config:set_local_config(~p)", [LocalConfig]),
-    ?DEBUG("maps module_info: ~p", [maps:module_info()]),
-    Map0 = maps:from_list([{a, 1}, {b, 2}]),
-    ?DEBUG("config:set_local_config Map0=~p", [Map0]),
-    Map = maps:from_list(LocalConfig),
-    ?DEBUG("config:set_local_config Map=~p", [Map]),
+    Map = map_from_list(LocalConfig),
     set_local_config(Map);
 set_local_config(LocalConfig) when is_map(LocalConfig) ->
-    ?DEBUG("config:set_local_config(~p)", [LocalConfig]),
-    erlang:put(local_config, LocalConfig).
+    io:format("config:set_local_config(~p)", [LocalConfig]),
+    erlang:put(local_config, LocalConfig),
+    io:format("after put").
+
+%% TODO: Change to maps:from_list(List) in Erlang 18
+map_from_list(List) ->
+    map_from_list(List, #{}).
+    
+map_from_list([], Map) ->
+    Map;
+map_from_list([{K, V} | Rest], Map) ->
+    map_from_list(Rest, Map#{K => V}).
 
 
 %% @doc Normalize the list of IPs and Ports.
