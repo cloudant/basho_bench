@@ -95,7 +95,7 @@ get(Key) ->
         {ok, Value} ->
             Value
     end,
-    ?DEBUG("config:get(~p) => ~p", [Key,V]),
+    %% TODO: ?DEBUG("config:get(~p) => ~p", [Key,V]),
     V.
 
 
@@ -112,7 +112,7 @@ get(Key, Default) ->
         {ok, Value} ->
             Value
     end,
-    ?DEBUG("config:get(~p,~p) => ~p", [Key, Default, V]),
+    %% TODO: ?DEBUG("config:get(~p,~p) => ~p", [Key, Default, V]),
     V.
 
 
