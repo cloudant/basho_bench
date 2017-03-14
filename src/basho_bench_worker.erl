@@ -118,11 +118,6 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     Ops     = ops_tuple(Operations),
     ShutdownOnError = basho_bench_config:get(shutdown_on_error, false),
 
-    %% Finally, initialize key and value generation. We pass in our ID to the
-    %% initialization to enable (optional) key/value space partitioning
-    KeyGen = basho_bench_keygen:new(basho_bench_config:get(key_generator), WorkerId),
-    ValGen = basho_bench_valgen:new(basho_bench_config:get(value_generator), WorkerId),
-
     %% TODO: either fix ops_configs or remove it
     %% I think the idea here was to allow specifying keygens in the `operations`
     %% field for each of the ops. For instance, allowing you to specify a
@@ -132,8 +127,6 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
     State0 = #state { id = Id,
                      api_pass_state = basho_bench_config:get(api_pass_state),
-                     keygen = KeyGen,
-                     valgen = ValGen,
                      driver = Driver,
                      local_config = WorkerConf,
                      worker_type = WorkerType,
@@ -284,7 +277,7 @@ worker_idle_loop(State) ->
             end,
             worker_idle_loop(State#state { driver_state = DriverState });
         run ->
-            case basho_bench_config:get(mode, State) of
+            case basho_bench_config:get(mode) of
                 max ->
                     ?INFO("Starting max worker: ~p on ~p~n", [self(), node()]),
                     max_worker_run_loop(State);

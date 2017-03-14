@@ -303,8 +303,9 @@ seq_gen_read_resume_value(Id, MaxValue) ->
 seq_gen_state_dir(Id) ->
     Key = sequential_int_state_dir,
     DirValid = get(seq_dir_test_res),
-    ?DEBUG("keygen:seq_gen_state_dir ~p", [Id]),
-    case {basho_bench_config:get(Key, "") , DirValid} of
+    %% TODO: This calls config:get for every single key generated - seems wasteful !!
+    %% TODO: Return to direct return without debug or use of V
+    V = case {basho_bench_config:get(Key, "") , DirValid} of
         {_Dir, false} ->
             "";
         {[$/|_] = Dir, true} ->
@@ -332,7 +333,9 @@ seq_gen_state_dir(Id) ->
                     ok
             end,
             ""
-    end.
+    end,
+    ?DEBUG("keygen:seq_gen_state_dir ~p ==> ~p", [Id, V]),
+    V.
 
 reset_sequential_int_state() ->
     case [X || {{sigen, X}, _} <- element(2, process_info(self(),
