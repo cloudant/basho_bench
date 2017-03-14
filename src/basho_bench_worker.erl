@@ -87,12 +87,13 @@ stop(Pids) ->
 %% gen_server callbacks
 %% ====================================================================
 
-init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
+init([SupChild, {WorkerType, WorkerId, WorkerGlobalId}=Id, WorkerConf]) ->
     ?DEBUG("***************************************************", []),
-    ?DEBUG("worker:init ID ~p WorkerType=~p~n    WorkerConf=~p", [WorkerId, WorkerType, WorkerConf]),
+    ?DEBUG("worker:init WorkerType=~p ID ~p WorkerGlobalID=~p~n    WorkerConf=~p",
+        [WorkerType, WorkerId, WorkerGlobalId, WorkerConf]),
     ?DEBUG("***************************************************", []),
 
-    %% Set local worker config
+    %% Set local worker config here and for subprocess during worker_init
     basho_bench_config:set_local_config(WorkerConf),
 
     %% Setup RNG seed for worker sub-process to use; incorporate the ID of
@@ -110,6 +111,7 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
             now -> now()
         end,
 
+    %% TODO: Do we want WorkerId (i.e. per worker type) or WorkerGlobalId (unique) ? 
     RngSeed = {A1+WorkerId, A2+WorkerId, A3+WorkerId},
 
     %% Pull all config settings from environment
@@ -124,6 +126,7 @@ init([SupChild, {WorkerType, WorkerId}=Id, WorkerConf]) ->
     %% different KeyGen for doc_get vs view_get, but this is not currently
     %% detailed in the new config spec.
     OptionsConfigs = ops_configs(WorkerId, Operations),
+
     %% Check configuration for flag enabling new API that passes opaque State object to support accessor functions
     State0 = #state { id = Id,
                      api_pass_state = basho_bench_config:get(api_pass_state),
@@ -251,6 +254,8 @@ worker_init(State) ->
     %% Trap exits from linked parent process; use this to ensure the driver
     %% gets a chance to cleanup
     process_flag(trap_exit, true),
+    %% Publish local config into worker subprocess
+    basho_bench_config:set_local_config(State#state.local_config),
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
 
@@ -407,7 +412,8 @@ rate_worker_run_loop(State, Lambda) ->
     end.
 
 add_generators(#state{api_pass_state = ApiPassState,id=Id}=State) ->
-    {_WorkerType, WorkerId} = Id,
+    {_WorkerType, WorkerId, _WorkerGlobalId} = Id,
+    % KeyGen needs to know WorkerId within a WorkerType (local concurrent) number of workers sharing a thread
     KeyGen = init_generators(ApiPassState, basho_bench_config:get(key_generator), WorkerId, basho_bench_keygen),
     ValGen = init_generators(ApiPassState, basho_bench_config:get(value_generator), WorkerId, basho_bench_valgen),
     State#state{keygen=KeyGen, valgen=ValGen}.
