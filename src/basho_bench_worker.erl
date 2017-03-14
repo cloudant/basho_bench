@@ -171,7 +171,6 @@ init([SupChild, {WorkerType, WorkerId, WorkerGlobalId}=Id, WorkerConf]) ->
         false ->
             ok
     end,
-    ?DEBUG("worker:init - end", []),
     {ok, State#state { worker_pid = WorkerPid }}.
 
 handle_call(run, _From, State) ->
@@ -211,7 +210,6 @@ code_change(_OldVsn, State, _Extra) ->
 %% Expand operations list into tuple suitable for weighted, random draw
 %%
 ops_tuple(Operations) ->
-    ?DEBUG("worker:ops_tuple(~p)", Operations),
     F =
         fun({OpTag, Count}) ->
                 lists:duplicate(Count, {OpTag, OpTag});
