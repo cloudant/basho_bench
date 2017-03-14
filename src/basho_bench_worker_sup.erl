@@ -72,6 +72,7 @@ init([]) ->
         _ -> 
             WorkerConfs = lists:map(
                 fun({WT, Count}) ->
+                    ?DEBUG("worker_sup:init - set concurrency of ~p to ~p", [WT, Count]),
                     %% TODO: Best way ? 
                     %% Burn in {concurrent, Count} to the WorkerConf
                     %% Key-generator(sequential) needs to know number of workers sharing that keygen

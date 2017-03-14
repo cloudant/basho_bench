@@ -251,9 +251,6 @@ worker_init(State) ->
     %% Trap exits from linked parent process; use this to ensure the driver
     %% gets a chance to cleanup
     process_flag(trap_exit, true),
-    %% Set local worker config
-    basho_bench_config:set_local_config(State#state.local_config),
-
     random:seed(State#state.rng_seed),
     worker_idle_loop(State).
 

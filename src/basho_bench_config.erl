@@ -117,7 +117,6 @@ get(Key, Default) ->
 
 
 set_local_config(LocalConfig) when is_list(LocalConfig) ->
-    ?DEBUG("config:set_local_config-list(~p)", [LocalConfig]),
     Map = my_map_from_list(LocalConfig),
     set_local_config(Map);
 set_local_config(LocalConfig) when is_map(LocalConfig) ->
