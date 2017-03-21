@@ -121,7 +121,7 @@ init([SupChild, {WorkerType, WorkerId, WorkerGlobalId}=Id, WorkerConf]) ->
                      local_config = WorkerConf,
                      worker_type = WorkerType,
                      shutdown_on_error = ShutdownOnError,
-                     should_report_stats = baso_bench_config:get(should_report_stats, true),
+                     should_report_stats = basho_bench_config:get(should_report_stats, true),
                      ops = Ops,
                      ops_len = size(Ops),
                      rng_seed = RngSeed,
@@ -371,7 +371,7 @@ rate_worker_run_loop(State, Lambda) ->
 maybe_report_stats(Op, Result, Stat, State) ->
     case State#state.should_report_stats of
         true ->
-            baso_bech_stats:op_complete(Op, Result, Stat);
+            basho_bench_stats:op_complete(Op, Result, Stat);
         false ->
             ok
     end.
