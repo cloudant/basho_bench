@@ -258,7 +258,6 @@ worker_idle_loop(State) ->
 
 %% Traditional call to run/4 passing OpTag, keygen, valgen, and driver state
 worker_next_op2(#state{api_pass_state=false}=State, OpTag) ->
-    %% call operation counter
     case catch((State#state.op_counter)()) of
         {stop, empty_keygen} ->
             ?INFO("Exhausted op_counter for worker: ~p~n",[State#state.id]),
@@ -272,7 +271,6 @@ worker_next_op2(#state{api_pass_state=false}=State, OpTag) ->
 %% When using api_pass_state, call run/3 passing Optag, driver state and worker state,
 %% then use accessors to get_keygen or get_valgen using State
 worker_next_op2(State, OpTag) ->
-    %% call operation counter
     case catch((State#state.op_counter)()) of
         {stop, empty_keygen} ->
             ?INFO("Exhausted op_counter for worker: ~p~n",[State#state.id]),
