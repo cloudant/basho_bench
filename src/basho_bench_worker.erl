@@ -262,7 +262,7 @@ worker_next_op2(#state{api_pass_state=false}=State, OpTag) ->
     case catch((State#state.op_counter)()) of
         {stop, empty_keygen} ->
             ?INFO("Exhausted op_counter for worker: ~p~n",[State#state.id]),
-            {stop, empty_keygen};
+            {stop, exhausted_op_counter};
         _ ->
             catch (State#state.driver):run(OpTag,
                                            State#state.keygen,
@@ -276,7 +276,7 @@ worker_next_op2(State, OpTag) ->
     case catch((State#state.op_counter)()) of
         {stop, empty_keygen} ->
             ?INFO("Exhausted op_counter for worker: ~p~n",[State#state.id]),
-            {stop, empty_keygen};
+            {stop, exhausted_op_counter};
         _ -> catch (State#state.driver):run(OpTag,
                                             State#state.driver_state,
                                             State)
