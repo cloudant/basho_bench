@@ -23,7 +23,15 @@
 
 -export([start/0]).
 
--export([setup_benchmark/1, run_benchmark/1, await_completion/1, main/1, md5/1, get_test_dir/0]).
+-export([
+    setup_benchmark/2,
+    run_benchmark/1,
+    await_completion/1,
+    main/1,
+    md5/1,
+    get_test_dir/0
+]).
+
 -include("basho_bench.hrl").
 
 
@@ -34,7 +42,7 @@ start() ->
 %% API
 %% ====================================================================
 
-setup_benchmark(Opts) ->
+setup_benchmark(Opts, Configs) ->
     BenchName = bench_name(Opts),
     TestDir = test_dir(Opts, BenchName),
     application:set_env(basho_bench, test_dir, TestDir),
@@ -62,6 +70,11 @@ setup_benchmark(Opts) ->
     CustomLagerLevel = basho_bench_config:get(log_level, debug),
     lager:set_loglevel(lager_console_backend, CustomLagerLevel),
     lager:set_loglevel(lager_file_backend, ConsoleLog, CustomLagerLevel),
+
+    %% Make sure this happens after starting lager or failures wont
+    %% show.
+    basho_bench_config:load(Configs),
+
     case basho_bench_config:get(distribute_work, false) of 
         true -> setup_distributed_work();
         false -> ok
@@ -82,10 +95,6 @@ run_benchmark(Configs) ->
         SourceDir ->
             load_source_files(SourceDir)
     end,
-
-    %% Make sure this happens after starting lager or failures wont
-    %% show.
-    basho_bench_config:load(Configs),
 
     %% Copy the config into the test dir for posterity
     [ begin {ok, _} = file:copy(Config, filename:join(TestDir, filename:basename(Config))) end
@@ -117,7 +126,7 @@ main(Args) ->
     ok = maybe_net_node(Opts),
     ok = maybe_join(Opts),
     {ok, _} = start(),
-    setup_benchmark(Opts),
+    setup_benchmark(Opts, Configs),
     run_benchmark(Configs),
     await_completion(infinity).
 
