@@ -384,8 +384,10 @@ rate_worker_run_loop(State, Lambda) ->
                     Delta = trunc(timer:now_diff(os:timestamp(), T0) / 1000),
                     case Lambda of
                         {static, Arrival} ->
-                            ?INFO("ARRIVAL|DELTA: ~p|~p: ~p~n", [Arrival, Delta, Arrival - Delta]),
-                            timer:sleep(Arrival - Delta);
+                            Sleep = Arrival - Delta,
+                            if Sleep =< 0 -> ok; true ->
+                                timer:sleep(Sleep)
+                            end;
                         _ ->
                             %% Delay between runs using exponentially distributed delays to mimic
                             %% queue.
