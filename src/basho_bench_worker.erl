@@ -248,7 +248,7 @@ worker_idle_loop(State) ->
                     ?INFO("Starting max worker: ~p on ~p~n", [self(), node()]),
                     max_worker_run_loop(State);
                 {static_rate, Rate} ->
-                    Arrival = (1000 / Rate) - 1,
+                    Arrival = trunc(1000 / Rate) - 1,
                     ?INFO("Starting ~w ms/req static rate worker: ~p on ~p\n", [Arrival, self(), node()]),
                     rate_worker_run_loop(State, {static, Arrival});
                 {rate, Rate} ->
