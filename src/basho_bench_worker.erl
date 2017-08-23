@@ -381,7 +381,7 @@ rate_worker_run_loop(State, Lambda) ->
                 true ->
                     ok;
                 false ->
-                    Delta = timer:now_diff(os:timestamp(), T0),
+                    Delta = trunc(timer:now_diff(os:timestamp(), T0) / 1000),
                     case Lambda of
                         {static, Arrival} ->
                             timer:sleep(Arrival - Delta);
