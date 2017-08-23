@@ -247,6 +247,10 @@ worker_idle_loop(State) ->
                 {rate, max} ->
                     ?INFO("Starting max worker: ~p on ~p~n", [self(), node()]),
                     max_worker_run_loop(State);
+                {static_rate, Rate} ->
+                    Arrival = (1000 / Rate) - 1,
+                    ?INFO("Starting ~w ms/req static rate worker: ~p on ~p\n", [Arrival, self(), node()]),
+                    rate_worker_run_loop(State, {static, Arrival});
                 {rate, Rate} ->
                     %% Calculate mean interarrival time in in milliseconds. A
                     %% fixed rate worker can generate (at max) only 1k req/sec.
@@ -372,7 +376,12 @@ max_worker_run_loop(State) ->
 rate_worker_run_loop(State, Lambda) ->
     %% Delay between runs using exponentially distributed delays to mimic
     %% queue.
-    timer:sleep(trunc(basho_bench_stats:exponential(Lambda))),
+    case Lambda of
+        {static, Arrival} ->
+            timer:sleep(Arrival);
+        _ ->
+            timer:sleep(trunc(basho_bench_stats:exponential(Lambda)))
+    end,
     case worker_next_op(State) of
         {ok, State2} ->
             case needs_shutdown(State2) of
