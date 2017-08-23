@@ -248,7 +248,7 @@ worker_idle_loop(State) ->
                     ?INFO("Starting max worker: ~p on ~p~n", [self(), node()]),
                     max_worker_run_loop(State);
                 {static_rate, Rate} ->
-                    Arrival = trunc(1000 / Rate) - 1,
+                    Arrival = trunc(1000 / Rate),
                     ?INFO("Starting ~w ms/req static rate worker: ~p on ~p\n", [Arrival, self(), node()]),
                     rate_worker_run_loop(State, {static, Arrival});
                 {rate, Rate} ->
@@ -374,20 +374,22 @@ max_worker_run_loop(State) ->
     end.
 
 rate_worker_run_loop(State, Lambda) ->
-    %% Delay between runs using exponentially distributed delays to mimic
-    %% queue.
-    case Lambda of
-        {static, Arrival} ->
-            timer:sleep(Arrival);
-        _ ->
-            timer:sleep(trunc(basho_bench_stats:exponential(Lambda)))
-    end,
+    T0 = os:timestamp(),
     case worker_next_op(State) of
         {ok, State2} ->
             case needs_shutdown(State2) of
                 true ->
                     ok;
                 false ->
+                    Delta = timer:now_diff(os:timestamp(), T0),
+                    case Lambda of
+                        {static, Arrival} ->
+                            timer:sleep(Arrival - Delta);
+                        _ ->
+                            %% Delay between runs using exponentially distributed delays to mimic
+                            %% queue.
+                            timer:sleep(trunc(basho_bench_stats:exponential(Lambda)))
+                    end,
                     rate_worker_run_loop(State2, Lambda)
             end;
         ExitReason ->
