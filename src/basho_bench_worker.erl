@@ -217,7 +217,7 @@ worker_init(State) ->
     process_flag(trap_exit, true),
     %% Publish local config into worker subprocess
     basho_bench_config:set_local_config(State#state.local_config),
-    random:seed(State#state.rng_seed),
+    rand:seed(exs64, State#state.rng_seed),
     worker_idle_loop(State).
 
 worker_idle_loop(State) ->
@@ -281,7 +281,7 @@ worker_next_op2(State, OpTag) ->
     end.
 
 worker_next_op(State) ->
-    {Label, OpTag} = element(random:uniform(State#state.ops_len), State#state.ops),
+    {Label, OpTag} = element(rand:uniform(State#state.ops_len), State#state.ops),
     Start = os:timestamp(),
     Result = worker_next_op2(State, OpTag),
     ElapsedUs = erlang:max(0, timer:now_diff(os:timestamp(), Start)),
