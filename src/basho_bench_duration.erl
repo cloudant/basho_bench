@@ -86,7 +86,10 @@ handle_info({'DOWN', Ref, process, _Object, Info}, #state{ref=Ref}=State) ->
     {stop, {shutdown, Info}, State};
 
 handle_info(timeout, State) ->
-    {stop, {shutdown, normal}, State}.
+    {stop, {shutdown, normal}, State};
+
+handle_info(_Msg, State) ->
+    {noreply, State}.
 
 
 terminate(Reason, #state{duration=DurationMins}) ->
