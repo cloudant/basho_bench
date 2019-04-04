@@ -86,7 +86,11 @@ handle_info({'DOWN', Ref, process, _Object, Info}, #state{ref=Ref}=State) ->
     {stop, {shutdown, Info}, State};
 
 handle_info(timeout, State) ->
-    {stop, {shutdown, normal}, State}.
+    {stop, {shutdown, normal}, State};
+
+handle_info(Msg, State) ->
+    ?WARN("basho_bench_duration handled unexpected info message: ~p", [Msg]),
+    {noreply, State}.
 
 
 terminate(Reason, #state{duration=DurationMins}) ->
