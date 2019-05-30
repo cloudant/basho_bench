@@ -96,8 +96,8 @@ run_benchmark(Configs) ->
     basho_bench_sup:start_child(),
     ok = basho_bench_stats:run(),
     ok = basho_bench_measurement:run(),
-    ok = basho_bench_worker:run(basho_bench_worker_sup:workers()),
     ok = basho_bench_duration:run(),
+    ok = basho_bench_worker:run(basho_bench_worker_sup:workers()),
     application:set_env(basho_bench_app, is_running, true).
 
 

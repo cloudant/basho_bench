@@ -74,7 +74,7 @@ handle_cast({worker_stopping, WorkerPid}, State) ->
         [] ->
             ?INFO("The application has stopped early!", []), 
             {stop, {shutdown, normal}, State}; 
-        _ -> 
+        _ ->
             maybe_end({noreply, State}) 
     end;
 
@@ -94,6 +94,12 @@ handle_info(Msg, State) ->
 
 
 terminate(Reason, #state{duration=DurationMins}) ->
+    case Reason of
+        {shutdown, normal} ->
+            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
+        {shutdown, Reason} ->
+            ?CONSOLE("Test stopped: ~p\n", [Reason])
+    end,
     case whereis(basho_bench_worker_sup) of
         undefined ->
             ok;
@@ -108,13 +114,8 @@ terminate(Reason, #state{duration=DurationMins}) ->
     run_hook(basho_bench_config:get(post_hook, no_op)),
     basho_bench_profiler:maybe_terminate_profiler(basho_bench_config:get(enable_profiler, false)),
     supervisor:terminate_child(basho_bench_sup, basho_bench_run_sup),
-    case Reason of
-        {shutdown, normal} ->
-            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
-        {shutdown, Reason} ->
-            ?CONSOLE("Test stopped: ~p\n", [Reason])
-    end,
     application:set_env(basho_bench_app, is_running, false),
+    application:stop(basho_bench),
     ok.
 
 
@@ -134,16 +135,20 @@ maybe_end(Return) ->
         infinity ->
             Return;
         Duration ->
-            case timer:now_diff(os:timestamp(), Start) of
-                Elapsed when Elapsed / 60000000 >= Duration ->
-                    ?CONSOLE("Stopping: ~p", [Elapsed]),
-                    {stop, normal, State};
-                Elapsed ->
-                    Timeout = round(Duration*60000 - Elapsed/1000),
-                    case tuple_size(Return) of
-                        2 -> {Reply, State, Timeout};
-                        3 -> {Reply, Message, State, Timeout}
-                    end
+            if Start /= undefined ->
+                case timer:now_diff(os:timestamp(), Start) of
+                    Elapsed when Elapsed / 60000000 >= Duration ->
+                        ?CONSOLE("Stopping: ~p", [Elapsed]),
+                        {stop, normal, State};
+                    Elapsed ->
+                        Timeout = round(Duration*60000 - Elapsed/1000),
+                        case tuple_size(Return) of
+                            2 -> {Reply, State, Timeout};
+                            3 -> {Reply, Message, State, Timeout}
+                        end
+                end;
+            true ->
+               {Reply, State}
             end
     end.
 

@@ -84,9 +84,9 @@
         %%
         %% Value generators
         %%
-        %% {fixed_bin, N} - Fixed size binary blob of N bytes
+        %% Default value generator is random an integer
         %%
-        {value_generator, {fixed_bin, 100}},
+        {value_generator, {uniform_int, 1}},
 
         {shutdown_timeout, 30000},
 
