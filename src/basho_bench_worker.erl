@@ -179,6 +179,11 @@ handle_info({'EXIT', Pid, Reason}, State) ->
             %% Stop this worker and check is there any other alive worker
             basho_bench_duration:worker_stopping(self()),
             {stop, normal, State};
+        {shutdown, _} ->
+            %% Worker process exited normally
+            %% Stop this worker and check is there any other alive worker
+            basho_bench_duration:worker_stopping(self()),
+            {stop, normal, State};
         {_, WorkerPid} ->
             ?ERROR("Worker ~p exited with ~p~n", [Pid, Reason]),
             %% Worker process exited for some other reason; stop this process

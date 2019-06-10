@@ -21,7 +21,7 @@ maybe_start_profiler(cprof, _Dir) ->
 maybe_start_profiler(eprof, _Dir) ->
     ?CONSOLE("Starting eprof profiling\n", []),
     {ok, Pid} = eprof:start(),
-    profiling = eprof:start_profiling([self()]),
+    profiling = eprof:start_profiling([self(),whereis(cb_fdb_key_generator), whereis(cb_fdb_key_cache),whereis(cb_sharded_ets)]),
     {ok, Pid};
 maybe_start_profiler(fprof, Dir) ->
     FprofTraceFile = filename:join(Dir, "fprofTrace.log"),
@@ -46,7 +46,7 @@ maybe_terminate_profiler(eprof, Dir) ->
     EprofFile = filename:join(Dir, "eprof.log"),
     eprof:stop_profiling(),
     eprof:log(EprofFile),
-    eprof:analyze(total),
+    eprof:analyze(procs),
     ?CONSOLE("Eprof output in ~p\n", [EprofFile]);
 maybe_terminate_profiler(fprof, Dir) ->
     FprofTraceFile = filename:join(Dir, "fprofTrace.log"),

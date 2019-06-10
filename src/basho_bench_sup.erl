@@ -48,4 +48,7 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    {ok, {{one_for_one, 5, 10}, [?CHILD(basho_bench_config, worker)]}}.
+    {ok, {{one_for_one, 5, 10}, [
+        ?CHILD(basho_bench_config, worker),
+        ?CHILD(basho_bench_value_source_cache, worker)
+    ]}}.

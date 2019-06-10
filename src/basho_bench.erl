@@ -62,10 +62,6 @@ setup_benchmark(Opts) ->
     CustomLagerLevel = basho_bench_config:get(log_level, debug),
     lager:set_loglevel(lager_console_backend, CustomLagerLevel),
     lager:set_loglevel(lager_file_backend, ConsoleLog, CustomLagerLevel),
-    case basho_bench_config:get(distribute_work, false) of
-        true -> setup_distributed_work();
-        false -> ok
-    end,
     ok.
 
 
@@ -93,6 +89,10 @@ run_benchmark(Configs) ->
 
     log_dimensions(),
 
+    case basho_bench_config:get(distribute_work, false) of
+        true -> setup_distributed_work();
+        false -> ok
+    end,
     basho_bench_sup:start_child(),
     ok = basho_bench_stats:run(),
     ok = basho_bench_measurement:run(),
@@ -291,7 +291,7 @@ setup_distributed_work() ->
     [pool:attach(SlaveName) || SlaveName <- SlaveNames],
     CodePaths = code:get_path(),
     rpc:multicall(SlaveNames, code, set_path, [CodePaths]),
-    Apps = [lager, basho_bench, getopt, bear, folsom, ibrowse, riakc, riak_pb, mochiweb, protobuffs, goldrush],
+    Apps = [lager, basho_bench, getopt, bear, folsom, ibrowse, cowlib, erlfdb, jiffy,gun, meck, ranch, recon, mochiweb, goldrush],
     [distribute_app(App) || App <- Apps].
 
 
