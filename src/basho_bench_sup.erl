@@ -48,4 +48,12 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    {ok, {{one_for_one, 5, 10}, [?CHILD(basho_bench_config, worker)]}}.
+    Children = case basho_bench:is_master() of
+        true ->
+            [?CHILD(basho_bench_config, worker)];
+        false ->
+            pong = net_adm:ping(basho_bench:master_node()),
+            global:sync(),
+            []
+    end,
+    {ok, {{one_for_one, 5, 10}, Children}}.

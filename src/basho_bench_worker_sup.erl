@@ -26,6 +26,8 @@
 %% API
 -export([start_link/0,
          workers/0,
+         workers/1,
+         remote_workers/1,
          stop_child/1,
          active_workers/0]).
 
@@ -42,7 +44,13 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 workers() ->
-    [Pid || {_Id, Pid, worker, [basho_bench_worker]} <- supervisor:which_children(?MODULE)].
+    workers(?MODULE).
+
+workers(Sup) ->
+    [Pid || {_Id, Pid, worker, [basho_bench_worker]} <- supervisor:which_children(Sup)].
+
+remote_workers(Node) ->
+    workers({?MODULE, Node}).
 
 stop_child(Id) ->
     supervisor:terminate_child(?MODULE, Id).

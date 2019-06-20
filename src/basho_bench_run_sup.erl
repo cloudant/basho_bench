@@ -19,9 +19,12 @@ init([]) ->
         [] -> [];
         _Driver -> [?CHILD(basho_bench_measurement, worker, Timeout)]
     end,
-    Spec = [
-        ?CHILD(basho_bench_duration, worker, Timeout),
-        ?CHILD(basho_bench_stats, worker, Timeout),
-        ?CHILD(basho_bench_worker_sup, supervisor, Timeout)
-    ] ++ MeasurementDriver,
-    {ok, {{one_for_all, 0, 1}, Spec}}.
+    Spec0 = [?CHILD(basho_bench_worker_sup, supervisor, Timeout)],
+    Spec1 = case basho_bench:is_master() of
+        true ->
+            [?CHILD(basho_bench_stats, worker, Timeout) | Spec0];
+        false ->
+            Spec0
+    end,
+    Spec2 = [?CHILD(basho_bench_duration, worker, Timeout) | Spec1],
+    {ok, {{one_for_all, 0, 1}, Spec2 ++ MeasurementDriver}}.

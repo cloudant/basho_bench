@@ -24,6 +24,7 @@
 -export([start/0]).
 
 -export([setup_benchmark/1, run_benchmark/1, await_completion/1, main/1, md5/1, get_test_dir/0]).
+-export([master_node/0, node_count/0, is_master/0, is_worker/0, is_clustered/0]).
 -include("basho_bench.hrl").
 
 
@@ -94,10 +95,30 @@ run_benchmark(Configs) ->
     log_dimensions(),
 
     basho_bench_sup:start_child(),
-    ok = basho_bench_stats:run(),
-    ok = basho_bench_measurement:run(),
-    ok = basho_bench_duration:run(),
-    ok = basho_bench_worker:run(basho_bench_worker_sup:workers()),
+    case {master_node(), node_count()} of
+        %% No master
+        {undefined, _} ->
+            bootstrap_bb(),
+            ok = run_benchmarks(basho_bench_worker_sup:workers());
+        %% Only one node, equivalent to no master
+        {_, 1} ->
+            bootstrap_bb(),
+            ok = run_benchmarks(basho_bench_worker_sup:workers());
+        %% Master and multiple workers
+        {MasterNode, NodeCount} when NodeCount > 1 ->
+            case MasterNode =:= node() of
+                true ->
+                    await_nodes(NodeCount),
+                    bootstrap_bb(),
+                    ok = run_benchmarks();
+                false ->
+                    ?INFO("Worker node[~p] connecting to master node: ~p~n", [node(), MasterNode]),
+                    pong = net_adm:ping(MasterNode),
+                    true = length(nodes()) > 0,
+                    %% Let master node decide when to run benchmarks
+                    ok = basho_bench_duration:run()
+            end
+    end,
     application:set_env(basho_bench_app, is_running, true).
 
 
@@ -346,3 +367,66 @@ get_test_dir() ->
         undefined -> error(unset_test_dir);
         {ok, TestDir} -> TestDir
     end.
+
+master_node() ->
+    case catch basho_bench_config:get(master_node, undefined) of
+        {'EXIT', {noproc, _}} ->
+            case init:get_argument(master_node) of
+                {ok, [[Node]]} -> list_to_atom(Node);
+                _ -> node()
+            end;
+        Res ->
+            Res
+    end.
+
+node_count() ->
+    case catch basho_bench_config:get(node_count, undefined) of
+        {'EXIT', {noproc, _}} ->
+            case init:get_argument(node_count) of
+                {ok, [[NodeCount]]} -> list_to_integer(NodeCount);
+                _ -> 1
+            end;
+        Res ->
+            Res
+    end.
+
+is_master() ->
+    case master_node() =:= node() of
+        true -> true;
+        false -> false
+    end.
+
+is_worker() ->
+    not is_master() and is_clustered().
+
+is_clustered() ->
+    case node_count() > 1 of
+        true -> true;
+        false -> false
+    end.
+
+await_nodes(NodeCount) ->
+    await_nodes(NodeCount, 100).
+
+await_nodes(NodeCount, SleepMS) ->
+    case NodeCount =:= length(nodes()) + 1 of
+        true ->
+            ok;
+        false ->
+            ?INFO("Waiting on ~p nodes to connect~n", [NodeCount - length(nodes()) - 1]),
+            timer:sleep(SleepMS),
+            await_nodes(NodeCount, SleepMS * 2)
+    end.
+
+bootstrap_bb() ->
+    ok = basho_bench_stats:run(),
+    ok = basho_bench_measurement:run(),
+    ok = basho_bench_duration:run().
+
+run_benchmarks() ->
+    Pids0 = [basho_bench_worker_sup:remote_workers(Node) || Node <- nodes()],
+    Pids = lists:flatten([basho_bench_worker_sup:workers() | Pids0]),
+    run_benchmarks(Pids).
+
+run_benchmarks(Pids) ->
+    ok = basho_bench_worker:run(Pids).
