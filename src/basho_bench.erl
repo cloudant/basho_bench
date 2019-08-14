@@ -376,6 +376,8 @@ master_node() ->
                 {ok, [[Node]]} -> list_to_atom(Node);
                 _ -> node()
             end;
+        undefined ->
+            node();
         Res ->
             Res
     end.
@@ -387,6 +389,8 @@ node_count() ->
                 {ok, [[NodeCount]]} -> list_to_integer(NodeCount);
                 _ -> 1
             end;
+        undefined ->
+            1;
         Res ->
             Res
     end.
