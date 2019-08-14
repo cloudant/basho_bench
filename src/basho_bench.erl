@@ -23,7 +23,7 @@
 
 -export([start/0]).
 
--export([setup_benchmark/1, run_benchmark/1, await_completion/1, main/1, md5/1, get_test_dir/0]).
+-export([setup_benchmark/2, run_benchmark/0, await_completion/1, main/1, md5/1, get_test_dir/0]).
 -export([master_node/0, node_count/0, is_master/0, is_worker/0, is_clustered/0]).
 -include("basho_bench.hrl").
 
@@ -35,7 +35,7 @@ start() ->
 %% API
 %% ====================================================================
 
-setup_benchmark(Opts) ->
+setup_benchmark(Opts, Configs) ->
     BenchName = bench_name(Opts),
     TestDir = test_dir(Opts, BenchName),
     application:set_env(basho_bench, test_dir, TestDir),
@@ -67,10 +67,7 @@ setup_benchmark(Opts) ->
         true -> setup_distributed_work();
         false -> ok
     end,
-    ok.
 
-
-run_benchmark(Configs) ->
     TestDir = get_test_dir(),
     %% Init code path
     add_code_paths(basho_bench_config:get(code_paths, [])),
@@ -94,6 +91,10 @@ run_benchmark(Configs) ->
 
     log_dimensions(),
 
+    ok.
+
+
+run_benchmark() ->
     basho_bench_sup:start_child(),
     case {master_node(), node_count()} of
         %% No master
@@ -138,8 +139,8 @@ main(Args) ->
     ok = maybe_net_node(Opts),
     ok = maybe_join(Opts),
     {ok, _} = start(),
-    setup_benchmark(Opts),
-    run_benchmark(Configs),
+    setup_benchmark(Opts, Configs),
+    run_benchmark(),
     await_completion(infinity).
 
 
