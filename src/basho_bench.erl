@@ -401,19 +401,13 @@ node_count() ->
     end.
 
 is_master() ->
-    case master_node() =:= node() of
-        true -> true;
-        false -> false
-    end.
+    master_node() =:= node().
 
 is_worker() ->
     not is_master() and is_clustered().
 
 is_clustered() ->
-    case node_count() > 1 of
-        true -> true;
-        false -> false
-    end.
+    node_count() > 1.
 
 await_nodes(NodeCount) ->
     await_nodes(NodeCount, 100).
