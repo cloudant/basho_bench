@@ -28,6 +28,9 @@
 -include("basho_bench.hrl").
 
 
+-define(AWAIT_TIMEOUT, 10000).
+
+
 start() ->
     application:ensure_all_started(basho_bench).
 
@@ -414,13 +417,18 @@ await_nodes(NodeCount) ->
     await_nodes(NodeCount, 100).
 
 await_nodes(NodeCount, SleepMS) ->
+    await_nodes(NodeCount, SleepMS, ?AWAIT_TIMEOUT).
+
+await_nodes(_, _, Timeout) when Timeout < 0 ->
+    throw({error, await_node_timeout});
+await_nodes(NodeCount, SleepMS, Timeout) ->
     case NodeCount =:= length(nodes()) + 1 of
         true ->
             ok;
         false ->
             ?INFO("Waiting on ~p nodes to connect~n", [NodeCount - length(nodes()) - 1]),
             timer:sleep(SleepMS),
-            await_nodes(NodeCount, SleepMS * 2)
+            await_nodes(NodeCount, SleepMS * 2, Timeout - SleepMS)
     end.
 
 bootstrap_bb() ->
