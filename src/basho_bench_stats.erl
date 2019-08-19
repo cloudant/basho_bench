@@ -65,7 +65,7 @@ op_complete(Op, ok, ElapsedUs) ->
 op_complete(Op, {ok, Units}, ElapsedUs) ->
     %% Update the histogram and units counter for the op in question
    % io:format("Get distributed: ~p~n", [get_distributed()]),
-    case get_distributed() of
+    case get_distributed() or basho_bench:is_worker() of
         true ->
             gen_server:cast({global, ?MODULE}, {Op, {ok, Units}, ElapsedUs});
         false ->
