@@ -373,27 +373,29 @@ get_test_dir() ->
     end.
 
 master_node() ->
+    Default = case init:get_argument(master_node) of
+        {ok, [[Node]]} -> list_to_atom(Node);
+        _ -> node()
+    end,
     case catch basho_bench_config:get(master_node, undefined) of
         {'EXIT', {noproc, _}} ->
-            case init:get_argument(master_node) of
-                {ok, [[Node]]} -> list_to_atom(Node);
-                _ -> node()
-            end;
+            Default;
         undefined ->
-            node();
+            Default;
         Res ->
             Res
     end.
 
 node_count() ->
+    Default = case init:get_argument(node_count) of
+        {ok, [[NodeCount]]} -> list_to_integer(NodeCount);
+        _ -> 1
+    end,
     case catch basho_bench_config:get(node_count, undefined) of
         {'EXIT', {noproc, _}} ->
-            case init:get_argument(node_count) of
-                {ok, [[NodeCount]]} -> list_to_integer(NodeCount);
-                _ -> 1
-            end;
+            Default;
         undefined ->
-            1;
+            Default;
         Res ->
             Res
     end.
