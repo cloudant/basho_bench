@@ -72,8 +72,10 @@ handle_call(remaining, _From, State) ->
 handle_cast({worker_stopping, WorkerPid}, State) ->
     case basho_bench_worker_sup:active_workers() -- [WorkerPid] of
         [] ->
-            ?INFO("The application has stopped early!", []), 
-            {stop, {shutdown, normal}, State}; 
+            ?INFO("The application has stopped early!", []),
+            #state{start=Start} = State,
+            Elapsed = timer:now_diff(os:timestamp(), Start) / 60000000,
+            {stop, {shutdown, normal}, State#state{duration=Elapsed}};
         _ ->
             maybe_end({noreply, State}) 
     end;
