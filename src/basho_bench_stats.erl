@@ -72,7 +72,9 @@ op_complete(Op, {ok, Units}, ElapsedUs) ->
             folsom_metrics:notify_existing_metric({latencies, Op}, ElapsedUs, histogram),
             folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
             folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
-            folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter)
+            folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter),
+            folsom_metrics:notify_existing_metric({overall_ops, Op}, {inc, 1}, counter),
+            folsom_metrics:notify_existing_metric({ops, Op}, {inc, 1}, counter)
     end,
     ok;
 op_complete(Op, Result, ElapsedUs) ->
@@ -114,7 +116,9 @@ init([]) ->
          folsom_metrics:new_histogram({latencies, Op}, slide, basho_bench_config:get(report_interval)),
          folsom_metrics:new_histogram({overall_latencies, Op}, uniform, 16384),
          folsom_metrics:new_counter({overall_units, Op}),
-         folsom_metrics:new_counter({units, Op})
+         folsom_metrics:new_counter({units, Op}),
+         folsom_metrics:new_counter({overall_ops, Op}),
+         folsom_metrics:new_counter({ops, Op})
      end || Op <- Ops ++ Measurements],
 
     StatsWriter = basho_bench_config:get(stats, csv),
@@ -162,9 +166,12 @@ handle_cast({Op, {ok, Units}, ElapsedUs}, State = #state{last_write_time = LWT, 
     folsom_metrics:notify_existing_metric({overall_latencies, Op}, ElapsedUs, histogram),
     folsom_metrics:notify_existing_metric({overall_units, Op}, {inc, Units}, counter),
     folsom_metrics:notify_existing_metric({units, Op}, {inc, Units}, counter),
+    folsom_metrics:notify_existing_metric({overall_ops, Op}, {inc, 1}, counter),
+    folsom_metrics:notify_existing_metric({ops, Op}, {inc, 1}, counter),
     {noreply, NewState};
 handle_cast(_, State) ->
     {noreply, State}.
+
 
 handle_info(report, State) ->
     consume_report_msgs(),
@@ -251,19 +258,21 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
     Window = timer:now_diff(Now, State#state.last_write_time) / 1000000,
 
     %% Time to report latency data to our CSV files
-    {Oks, Errors, OkOpsRes} =
-        lists:foldl(fun(Op, {TotalOks, TotalErrors, OpsResAcc}) ->
-                            {Oks, Errors} = report_latency(State, Elapsed, Window, Op),
-                            {TotalOks + Oks, TotalErrors + Errors,
-                             [{Op, Oks}|OpsResAcc]}
-                    end, {0,0,[]}, State#state.ops),
+    {Ops, Oks, Errors, OkOpsRes} =
+        lists:foldl(fun(Op, {TotalOps, TotalOks, TotalErrors, OpsResAcc}) ->
+                            {Ops, Oks, Errors} = report_latency(State, Elapsed, Window, Op),
+                            {TotalOps + Ops, TotalOks + Oks, TotalErrors + Errors,
+                             [{Op, Oks, Ops}|OpsResAcc]}
+                    end, {0,0,0,[]}, State#state.ops),
 
     %% Reset units
-    [folsom_metrics_counter:dec({units, Op}, OpAmount) || {Op, OpAmount} <- OkOpsRes],
+    [folsom_metrics_counter:dec({units, Op}, OksAmount) || {Op, OksAmount, _} <- OkOpsRes],
+    %% Reset Ops
+    [folsom_metrics_counter:dec({ops, Op}, OpsAmount) || {Op, _, OpsAmount} <- OkOpsRes],
 
     %% Write summary
     Module:process_summary(State#state.stats_writer_data,
-                           Elapsed, Window, Oks, Errors),
+                           Elapsed, Window, Ops, Oks, Errors),
 
     %% Dump current error counts to console
     case (State#state.errors_since_last_report) of
@@ -285,7 +294,8 @@ process_global_stats(#state{stats_writer=Module}=State) ->
         Stats = folsom_metrics:get_histogram_statistics({overall_latencies, Op}),
         Errors = error_counter(Op),
         Units = folsom_metrics:get_metric_value({overall_units, Op}),
-        Module:report_global_stats(Op, Stats, Errors, Units)
+        Ops = folsom_metrics:get_metric_value({overall_ops, Op}),
+        Module:report_global_stats(Op, Stats, Errors, Units, Ops)
     end, State#state.ops).
 
 %%
@@ -296,12 +306,13 @@ report_latency(#state{stats_writer=Module}=State, Elapsed, Window, Op) ->
     Stats = folsom_metrics:get_histogram_statistics({latencies, Op}),
     Errors = error_counter(Op),
     Units = folsom_metrics:get_metric_value({units, Op}),
+    Ops = folsom_metrics:get_metric_value({ops, Op}),
 
     Module:report_latency({State#state.stats_writer,
                                              State#state.stats_writer_data},
                                             Elapsed, Window, Op,
-                                            Stats, Errors, Units),
-    {Units, Errors}.
+                                            Stats, Errors, Units, Ops),
+    {Ops, Units, Errors}.
 
 report_total_errors(#state{stats_writer=Module}=State) ->
     case ets:tab2list(basho_bench_total_errors) of
@@ -349,14 +360,14 @@ get_worker_ops() ->
    Workers = basho_bench_config:get(workers, []),
    case Workers of
        %% No workers reverts to original case is fine as long as we stick with 2-tuples
-       [] -> 
+       [] ->
             lists:map(
                 fun({OpTag, _Count}) -> {OpTag, OpTag};
                     ({Label, OpTag, _Count}) -> {Label, OpTag};
                     ({Label, OpTag, _Count, _OptionsList}) -> {Label, OpTag}
                 end, basho_bench_config:get(operations, []));
        %% Use workers to determine active worker types for current config
-        _ -> 
+        _ ->
             get_worker_ops(Workers, basho_bench_config:get(worker_types), [])
     end.
 
@@ -374,7 +385,7 @@ get_worker_ops([{WorkerType, _Count} | RestWorkers], WorkerTypes, Acc) ->
     end,
 
      Ops = lists:map(
-        fun({OpTag, _Count2}) -> 
+        fun({OpTag, _Count2}) ->
                 { worker_op_name(WorkerType, OpTag), worker_op_name(WorkerType, OpTag)};
            ({Label, OpTag, _Count2}) ->
                 { worker_op_name(WorkerType, Label), worker_op_name(WorkerType, OpTag)}
@@ -383,7 +394,7 @@ get_worker_ops([{WorkerType, _Count} | RestWorkers], WorkerTypes, Acc) ->
 
 
 worker_op_name(Worker,Op) ->
-    case Worker of 
+    case Worker of
         single_worker ->
             Op;
         _ ->
