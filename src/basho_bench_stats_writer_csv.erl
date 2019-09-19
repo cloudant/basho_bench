@@ -33,10 +33,10 @@
 
 -export([new/2,
          terminate/1,
-         process_summary/5,
+         process_summary/6,
          report_error/3,
-         report_global_stats/4,
-         report_latency/7]).
+         report_global_stats/5,
+         report_latency/8]).
 
 -include("basho_bench.hrl").
 
@@ -57,7 +57,7 @@ new(Ops, Measurements) ->
         filename:join([TestDir, "summary.csv"]),
         [raw, binary, write]
     ),
-    file:write(SummaryFile, <<"elapsed, window, total, successful, failed\n">>),
+    file:write(SummaryFile, <<"elapsed, window, total_operations, total_units, successful, failed\n">>),
 
     %% Setup errors file w/counters for each error.  Embedded commas likely
     %% in the error messages so quote the columns.
@@ -82,13 +82,14 @@ terminate({SummaryFile, ErrorsFile}) ->
     ok.
 
 process_summary({SummaryFile, _ErrorsFile},
-                Elapsed, Window, Oks, Errors) ->
+                Elapsed, Window, Ops, Oks, Errors) ->
     file:write(SummaryFile,
-               io_lib:format("~w, ~w, ~w, ~w, ~w\n",
+               io_lib:format("~w, ~w, ~w, ~w, ~w, ~w\n",
                              [Elapsed,
                               Window,
-                              Oks + Errors,
+                              Ops + Errors,
                               Oks,
+                              Ops,
                               Errors])).
 
 report_error({_SummaryFile, ErrorsFile},
@@ -97,8 +98,8 @@ report_error({_SummaryFile, ErrorsFile},
                io_lib:format("\"~w\",\"~w\"\n",
                              [Key, Count])).
 
-report_global_stats({Op,_}, Stats, Errors, Units) ->
-    %% Build up JSON structure representing statistices collected in folsom
+report_global_stats({Op,_}, Stats, Errors, Units, Ops) ->
+    %% Build up JSON structure representing statistics collected in folsom
     P = proplists:get_value(percentile, Stats),
     JsonElements0 = lists:foldl(fun(K, Acc) ->
         case K of
@@ -132,21 +133,25 @@ report_global_stats({Op,_}, Stats, Errors, Units) ->
     %% insert error counts
     JsonElements2 = [{basho_errors, Errors} | JsonElements1],
 
+    %% insert Ops counts
+    JsonElements3 = [{'ops', Ops} | JsonElements2],
+
     JsonMetrics0 = erlang:get(run_metrics),
-    JsonMetrics = lists:keyreplace(Op, 1, JsonMetrics0, {Op, {JsonElements2}}),
+    JsonMetrics = lists:keyreplace(Op, 1, JsonMetrics0, {Op, {JsonElements3}}),
     %?DEBUG("Generated Json:\n~w",[JsonElements]),
     erlang:put(run_metrics, JsonMetrics).
 
 report_latency({_SummaryFile, _ErrorsFile},
                Elapsed, Window, Op,
-               Stats, Errors, Units) ->
+               Stats, Errors, Units, Ops) ->
     case proplists:get_value(n, Stats) > 0 of
         true ->
             P = proplists:get_value(percentile, Stats),
-            Line = io_lib:format("~w, ~w, ~w, ~w, ~.1f, ~w, ~w, ~w, ~w, ~w, ~w\n",
+            Line = io_lib:format("~w, ~w, ~w, ~w, ~w, ~.1f, ~w, ~w, ~w, ~w, ~w, ~w\n",
                                  [Elapsed,
                                   Window,
                                   Units,
+                                  Ops,
                                   proplists:get_value(min, Stats),
                                   proplists:get_value(arithmetic_mean, Stats),
                                   proplists:get_value(median, Stats),
@@ -157,7 +162,7 @@ report_latency({_SummaryFile, _ErrorsFile},
                                   Errors]);
         false ->
             ?WARN("No data for op: ~p\n", [Op]),
-            Line = io_lib:format("~w, ~w, 0, 0, 0, 0, 0, 0, 0, 0, ~w\n",
+            Line = io_lib:format("~w, ~w, 0, 0, 0, 0, 0, 0, 0, 0, 0, ~w\n",
                                  [Elapsed,
                                   Window,
                                   Errors])
@@ -172,7 +177,7 @@ op_csv_file({Label, _Op}) ->
     TestDir = basho_bench:get_test_dir(),
     Fname = filename:join([TestDir, normalize_label(Label) ++ "_latencies.csv"]),
     {ok, F} = file:open(Fname, [raw, binary, write]),
-    ok = file:write(F, <<"elapsed, window, n, min, mean, median, 95th, 99th, 99_9th, max, errors\n">>),
+    ok = file:write(F, <<"elapsed, window, n, ops, min, mean, median, 95th, 99th, 99_9th, max, errors\n">>),
     F.
 
 measurement_csv_file({Label, _Op}) ->
@@ -194,7 +199,7 @@ stringify_stats(_RunStatsType=json, RunMetrics) ->
     [ jiffy:encode( {[{recordedMetrics, {RunMetrics}}]}, [pretty] ) ];
 stringify_stats(_RunStatsType=csv, RunMetrics) ->
     % Ordered output of fields
-    OrderedFields = [n, mean, geometric_mean, harmonic_mean,
+    OrderedFields = [n, ops, mean, geometric_mean, harmonic_mean,
         variance, standard_deviation, skewness, kurtosis,
         median, p75, p90, p95, p99, p999,
         min, max, basho_errors],
@@ -223,7 +228,7 @@ write_run_statistics(FileName, Lines)->
         FileName,
         [raw, binary, write]
     ),
-    
+
     %% Write lines to file
     lists:foreach(fun(Line) ->
         ok = file:write(GlobalMetricsFile, Line)
@@ -251,4 +256,3 @@ replace_special_chars([_|T]) ->
     [$-|replace_special_chars(T)];
 replace_special_chars([]) ->
     [].
-
