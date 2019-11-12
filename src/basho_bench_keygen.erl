@@ -91,9 +91,11 @@ new({sequential_int, MaxKey}, Id)
     fun() -> sequential_int_generator(Ref, MaxKey, Id, DisableProgress) end;
 new({partitioned_sequential_int, MaxKey}, Id) ->
     new({partitioned_sequential_int, 0, MaxKey}, Id);
-new({partitioned_sequential_int, StartKey, NumKeys}, Id)
-  when is_integer(StartKey), is_integer(NumKeys), NumKeys > 0 ->
+new({partitioned_sequential_int, StartKey, NumKeys}, Id) ->
     Workers = basho_bench_config:get(concurrent),
+    new({partitioned_sequential_int, StartKey, NumKeys, Workers}, Id);
+new({partitioned_sequential_int, StartKey, NumKeys, Workers}, Id)
+  when is_integer(StartKey), is_integer(NumKeys), NumKeys > 0 ->
     Range = NumKeys div Workers,
     MinValue = StartKey + Range * (Id - 1),
     MaxValue = StartKey +
