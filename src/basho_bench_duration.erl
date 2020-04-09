@@ -106,6 +106,8 @@ handle_info(Msg, State) ->
 
 terminate(Reason, #state{duration=DurationMins}) ->
     case Reason of
+        normal ->
+            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
         {shutdown, normal} ->
             ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
         {shutdown, Reason} ->
