@@ -270,9 +270,10 @@ process_stats(Now, #state{stats_writer=Module}=State) ->
     %% Reset Ops
     [folsom_metrics_counter:dec({ops, Op}, OpsAmount) || {Op, _, OpsAmount} <- OkOpsRes],
 
+    Concurrency = basho_bench_worker_sup:worker_count(),
     %% Write summary
     Module:process_summary(State#state.stats_writer_data,
-                           Elapsed, Window, Ops, Oks, Errors),
+                           Elapsed, Window, Concurrency, Ops, Oks, Errors),
 
     %% Dump current error counts to console
     case (State#state.errors_since_last_report) of
@@ -295,7 +296,8 @@ process_global_stats(#state{stats_writer=Module}=State) ->
         Errors = error_counter(Op),
         Units = folsom_metrics:get_metric_value({overall_units, Op}),
         Ops = folsom_metrics:get_metric_value({overall_ops, Op}),
-        Module:report_global_stats(Op, Stats, Errors, Units, Ops)
+        Concurrency = basho_bench_worker_sup:worker_count(),
+        Module:report_global_stats(Op, Stats, Errors, Units, Ops, Concurrency)
     end, State#state.ops).
 
 %%
@@ -307,10 +309,11 @@ report_latency(#state{stats_writer=Module}=State, Elapsed, Window, Op) ->
     Errors = error_counter(Op),
     Units = folsom_metrics:get_metric_value({units, Op}),
     Ops = folsom_metrics:get_metric_value({ops, Op}),
+    Concurrency = basho_bench_worker_sup:worker_count(),
 
     Module:report_latency({State#state.stats_writer,
                                              State#state.stats_writer_data},
-                                            Elapsed, Window, Op,
+                                            Elapsed, Window, Concurrency, Op,
                                             Stats, Errors, Units, Ops),
     {Ops, Units, Errors}.
 
