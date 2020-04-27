@@ -26,7 +26,7 @@
 %% API
 -export([start_link/0,
          add_worker/0,
-         add_worker/1,
+         add_workers/1,
          add_worker_spec/1,
          workers/0,
          workers/1,
@@ -110,7 +110,13 @@ add_worker() ->
     add_worker_spec(Spec).
 
 
-add_worker(WorkerType) when is_atom(WorkerType) ->
+add_workers(WorkerTypes) ->
+    add_workers(WorkerTypes, []).
+
+
+add_workers([], Acc) ->
+    Acc;
+add_workers([WorkerType|WorkerTypes], Acc) when is_atom(WorkerType) ->
     WorkerTypes = basho_bench_config:get(worker_types),
     Conf0 = proplists:get_value(WorkerType, WorkerTypes, []),
     Conf = [{concurrent, 1} | proplists:delete(concurrent, Conf0)],
@@ -122,7 +128,7 @@ add_worker(WorkerType) when is_atom(WorkerType) ->
         {basho_bench_worker, start_link, [Id, {WorkerType, WorkerNum, WorkerNum}, Conf]},
         transient, 5000, worker, [basho_bench_worker]},
     io:format("ADDING WORKER[~p]: ~p~n", [WorkerCount, Spec]),
-    add_worker_spec(Spec).
+    add_workers(WorkerTypes, [add_worker_spec(Spec)|Acc]).
 
 
 add_worker_spec(Spec) ->

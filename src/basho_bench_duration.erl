@@ -96,7 +96,7 @@ handle_info(timeout, State) ->
 
 handle_info(rampup, State) ->
     ?INFO("Triggering worker rampup", []),
-    basho_bench_worker_sup:add_worker(),
+    add_worker(),
     maybe_end({noreply, State});
 
 handle_info(Msg, State) ->
@@ -185,4 +185,13 @@ maybe_add_rampup(State) ->
             State#state{rampup_interval=Interval};
         Else ->
             throw({unexpected_rampup, Else})
+    end.
+
+add_worker() ->
+    case basho_bench_config:get(workers, undefined) of
+        undefined ->
+            basho_bench_worker_sup:add_worker();
+        [_|_] = Workers ->
+            WorkerTypes = [WT || {WT, _C} <- Workers],
+            basho_bench_worker_sup:add_workers(WorkerTypes)
     end.
