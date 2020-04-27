@@ -183,6 +183,9 @@ maybe_add_rampup(State) ->
             State;
         Interval when is_integer(Interval) ->
             State#state{rampup_interval=Interval};
+        %% TODO: should we support per type intervals?
+        [{_Type, Interval} | _ ] when is_integer(Interval) ->
+            State#state{rampup_interval=Interval};
         Else ->
             throw({unexpected_rampup, Else})
     end.
