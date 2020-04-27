@@ -132,7 +132,10 @@ add_workers([WorkerType|Rest], Acc) when is_atom(WorkerType) ->
 
 
 add_worker_spec(Spec) ->
-    supervisor:start_child(?MODULE, Spec).
+    io:format("STARTING CHILD: ~p~n", [Spec]),
+    Resp = supervisor:start_child(?MODULE, Spec),
+    io:format("    START CHILD RESP: ~p~n", [Resp]),
+    Resp.
 
 
 worker_specs([]) ->
