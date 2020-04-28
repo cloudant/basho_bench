@@ -111,7 +111,7 @@ add_worker() ->
 
 
 add_workers(WorkerTypes) ->
-    [add_worker_spec(Spec) || Spec <- add_workers(WorkerTypes, [])].
+    add_workers(WorkerTypes, []).
 
 
 add_workers([], Acc) ->
