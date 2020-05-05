@@ -195,9 +195,7 @@ measurement_csv_file({Label, _Op}) ->
 
 
 dump_run_statistics(RunStatsType) ->
-    io:format("DUMPING THE RUN STATISTICS: ~p~n", [RunStatsType]),
     Lines = stringify_stats(RunStatsType, erlang:get(run_metrics)),
-    io:format("GOT LINES: ~n~p~n", [Lines]),
     TestDir = basho_bench:get_test_dir(),
     FileName = filename:join([TestDir, "run_statistics." ++ atom_to_list(RunStatsType)]),
     write_run_statistics(FileName, Lines).

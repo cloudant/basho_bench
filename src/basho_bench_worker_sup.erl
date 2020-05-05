@@ -127,15 +127,11 @@ add_workers([WorkerType|Rest], Acc) when is_atom(WorkerType) ->
         Id,
         {basho_bench_worker, start_link, [Id, {WorkerType, WorkerNum, WorkerNum}, Conf]},
         transient, 5000, worker, [basho_bench_worker]},
-    io:format("ADDING WORKER[~p]: ~p~n", [WorkerCount, Spec]),
     add_workers(Rest, [add_worker_spec(Spec)|Acc]).
 
 
 add_worker_spec(Spec) ->
-    io:format("STARTING CHILD: ~p~n", [Spec]),
-    Resp = supervisor:start_child(?MODULE, Spec),
-    io:format("    START CHILD RESP: ~p~n", [Resp]),
-    Resp.
+    {ok, _Pid} = supervisor:start_child(?MODULE, Spec).
 
 
 worker_specs([]) ->
