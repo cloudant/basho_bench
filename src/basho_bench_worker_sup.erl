@@ -25,8 +25,12 @@
 
 %% API
 -export([start_link/0,
+         add_worker/0,
+         add_workers/1,
+         add_worker_spec/1,
          workers/0,
          workers/1,
+         worker_count/0,
          remote_workers/1,
          stop_child/1,
          active_workers/0]).
@@ -58,6 +62,21 @@ stop_child(Id) ->
 active_workers() ->
     [X || X <- workers(), X =/= undefined].
 
+worker_count() ->
+    case whereis(?MODULE) of
+        undefined ->
+            case erlang:get(last_worker_count) of
+                undefined ->
+                    0;
+                WC ->
+                    WC
+            end;
+        _Pid ->
+            WC = length(active_workers()),
+            erlang:put(last_worker_count, WC),
+            WC
+    end.
+
 
 %% ===================================================================
 %% Supervisor callbacks
@@ -76,6 +95,43 @@ init([]) ->
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
+
+
+add_worker() ->
+    WorkerCount = length(active_workers()),
+    WorkerNum = WorkerCount + 1,
+    Id = list_to_atom(lists:concat(['basho_bench_rampup_worker_', WorkerNum])),
+    %% Use "single_worker" atom for original non-worker case
+    Spec = {
+        Id,
+        {basho_bench_worker, start_link, [Id, {single_worker, WorkerNum, WorkerNum}, []]},
+        transient, 5000, worker, [basho_bench_worker]
+    },
+    add_worker_spec(Spec).
+
+
+add_workers(WorkerTypes) ->
+    add_workers(WorkerTypes, []).
+
+
+add_workers([], Acc) ->
+    Acc;
+add_workers([WorkerType|Rest], Acc) when is_atom(WorkerType) ->
+    WorkerTypes = basho_bench_config:get(worker_types),
+    Conf0 = proplists:get_value(WorkerType, WorkerTypes, []),
+    Conf = [{concurrent, 1} | proplists:delete(concurrent, Conf0)],
+    WorkerCount = length(active_workers()),
+    WorkerNum = WorkerCount + 1,
+    Id = list_to_atom(lists:concat(['basho_bench_rampup_worker_', WorkerType, '_', WorkerNum])),
+    Spec = {
+        Id,
+        {basho_bench_worker, start_link, [Id, {WorkerType, WorkerNum, WorkerNum}, Conf]},
+        transient, 5000, worker, [basho_bench_worker]},
+    add_workers(Rest, [add_worker_spec(Spec)|Acc]).
+
+
+add_worker_spec(Spec) ->
+    {ok, _Pid} = supervisor:start_child(?MODULE, Spec).
 
 
 worker_specs([]) ->

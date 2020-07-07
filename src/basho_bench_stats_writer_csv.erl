@@ -33,10 +33,10 @@
 
 -export([new/2,
          terminate/1,
-         process_summary/6,
+         process_summary/7,
          report_error/3,
-         report_global_stats/5,
-         report_latency/8]).
+         report_global_stats/6,
+         report_latency/9]).
 
 -include("basho_bench.hrl").
 
@@ -57,7 +57,7 @@ new(Ops, Measurements) ->
         filename:join([TestDir, "summary.csv"]),
         [raw, binary, write]
     ),
-    file:write(SummaryFile, <<"elapsed, window, total_operations, total_units, successful, failed\n">>),
+    file:write(SummaryFile, <<"elapsed, window, concurrency, total_operations, total_units, successful, failed\n">>),
 
     %% Setup errors file w/counters for each error.  Embedded commas likely
     %% in the error messages so quote the columns.
@@ -82,11 +82,12 @@ terminate({SummaryFile, ErrorsFile}) ->
     ok.
 
 process_summary({SummaryFile, _ErrorsFile},
-                Elapsed, Window, Ops, Oks, Errors) ->
+                Elapsed, Window, Concurrency, Ops, Oks, Errors) ->
     file:write(SummaryFile,
-               io_lib:format("~w, ~w, ~w, ~w, ~w, ~w\n",
+               io_lib:format("~w, ~w, ~w, ~w, ~w, ~w, ~w\n",
                              [Elapsed,
                               Window,
+                              Concurrency,
                               Ops + Errors,
                               Oks,
                               Ops,
@@ -98,7 +99,7 @@ report_error({_SummaryFile, ErrorsFile},
                io_lib:format("\"~w\",\"~w\"\n",
                              [Key, Count])).
 
-report_global_stats({Op,_}, Stats, Errors, Units, Ops) ->
+report_global_stats({Op,_}, Stats, Errors, Units, Ops, Concurrency) ->
     %% Build up JSON structure representing statistics collected in folsom
     P = proplists:get_value(percentile, Stats),
     JsonElements0 = lists:foldl(fun(K, Acc) ->
@@ -136,20 +137,24 @@ report_global_stats({Op,_}, Stats, Errors, Units, Ops) ->
     %% insert Ops counts
     JsonElements3 = [{'ops', Ops} | JsonElements2],
 
+    %% insert concurrency
+    JsonElements4 = [{concurrency, Concurrency} | JsonElements3],
+
     JsonMetrics0 = erlang:get(run_metrics),
-    JsonMetrics = lists:keyreplace(Op, 1, JsonMetrics0, {Op, {JsonElements3}}),
+    JsonMetrics = lists:keyreplace(Op, 1, JsonMetrics0, {Op, {JsonElements4}}),
     %?DEBUG("Generated Json:\n~w",[JsonElements]),
     erlang:put(run_metrics, JsonMetrics).
 
 report_latency({_SummaryFile, _ErrorsFile},
-               Elapsed, Window, Op,
+               Elapsed, Window, Concurrency, Op,
                Stats, Errors, Units, Ops) ->
     case proplists:get_value(n, Stats) > 0 of
         true ->
             P = proplists:get_value(percentile, Stats),
-            Line = io_lib:format("~w, ~w, ~w, ~w, ~w, ~.1f, ~w, ~w, ~w, ~w, ~w, ~w\n",
+            Line = io_lib:format("~w, ~w, ~w, ~w, ~w, ~w, ~.1f, ~w, ~w, ~w, ~w, ~w, ~w\n",
                                  [Elapsed,
                                   Window,
+                                  Concurrency,
                                   Units,
                                   Ops,
                                   proplists:get_value(min, Stats),
@@ -177,7 +182,7 @@ op_csv_file({Label, _Op}) ->
     TestDir = basho_bench:get_test_dir(),
     Fname = filename:join([TestDir, normalize_label(Label) ++ "_latencies.csv"]),
     {ok, F} = file:open(Fname, [raw, binary, write]),
-    ok = file:write(F, <<"elapsed, window, n, ops, min, mean, median, 95th, 99th, 99_9th, max, errors\n">>),
+    ok = file:write(F, <<"elapsed, window, concurrency, n, ops, min, mean, median, 95th, 99th, 99_9th, max, errors\n">>),
     F.
 
 measurement_csv_file({Label, _Op}) ->
@@ -199,7 +204,7 @@ stringify_stats(_RunStatsType=json, RunMetrics) ->
     [ jiffy:encode( {[{recordedMetrics, {RunMetrics}}]}, [pretty] ) ];
 stringify_stats(_RunStatsType=csv, RunMetrics) ->
     % Ordered output of fields
-    OrderedFields = [n, ops, mean, geometric_mean, harmonic_mean,
+    OrderedFields = [n, ops, concurrency, mean, geometric_mean, harmonic_mean,
         variance, standard_deviation, skewness, kurtosis,
         median, p75, p90, p95, p99, p999,
         min, max, basho_errors],

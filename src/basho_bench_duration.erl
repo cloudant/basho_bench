@@ -28,7 +28,8 @@
 -record(state, {
     ref,
     duration,
-    start
+    start,
+    rampup_interval
 }).
 
 -include("basho_bench.hrl").
@@ -50,7 +51,7 @@ start_link() ->
 init([]) ->
     run_hook(basho_bench_config:get(pre_hook, no_op)),
     Ref = erlang:monitor(process, whereis(basho_bench_run_sup)),
-    {ok, #state{ref=Ref}}.
+    {ok, maybe_add_rampup(#state{ref=Ref})}.
 
 
 handle_call(run, _From, State) ->
@@ -60,6 +61,9 @@ handle_call(run, _From, State) ->
         start=os:timestamp(),
         duration=DurationMins
     },
+    if NewState#state.rampup_interval =:= undefined -> ok; true ->
+        timer:send_interval(NewState#state.rampup_interval, rampup)
+    end,
     maybe_end({reply, ok, NewState});
 
 handle_call(remaining, _From, State) ->
@@ -90,13 +94,20 @@ handle_info({'DOWN', Ref, process, _Object, Info}, #state{ref=Ref}=State) ->
 handle_info(timeout, State) ->
     {stop, {shutdown, normal}, State};
 
+handle_info(rampup, State) ->
+    ?INFO("Triggering worker rampup", []),
+    add_worker(),
+    maybe_end({noreply, State});
+
 handle_info(Msg, State) ->
     ?WARN("basho_bench_duration handled unexpected info message: ~p", [Msg]),
-    {noreply, State}.
+    maybe_end({noreply, State}).
 
 
 terminate(Reason, #state{duration=DurationMins}) ->
     case Reason of
+        normal ->
+            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
         {shutdown, normal} ->
             ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
         {shutdown, Reason} ->
@@ -165,3 +176,25 @@ worker_stopping(WorkerPid) ->
     %% WorkerPid is basho_bench_worker's id, not the pid of actual driver 
     gen_server:cast(?MODULE, {worker_stopping, WorkerPid}),
     ok.
+
+maybe_add_rampup(State) ->
+    case basho_bench_config:get(workers_rampup, undefined) of
+        undefined ->
+            State;
+        Interval when is_integer(Interval) ->
+            State#state{rampup_interval=Interval};
+        %% TODO: should we support per type intervals?
+        [{_Type, Interval} | _ ] when is_integer(Interval) ->
+            State#state{rampup_interval=Interval};
+        Else ->
+            throw({unexpected_rampup, Else})
+    end.
+
+add_worker() ->
+    case basho_bench_config:get(workers, undefined) of
+        undefined ->
+            basho_bench_worker_sup:add_worker();
+        [_|_] = Workers ->
+            WorkerTypes = [WT || {WT, _C} <- Workers],
+            basho_bench_worker_sup:add_workers(WorkerTypes)
+    end.
