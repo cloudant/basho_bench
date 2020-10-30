@@ -73,8 +73,7 @@ terminate({SummaryFile, ErrorsFile}) ->
     ?INFO("module=~s event=stop stats_sink=csv\n", [?MODULE]),
 
     %% write out run-wide statistics before exiting
-    RunStatsType = basho_bench_config:get(run_statistics_output_format, csv),
-    dump_run_statistics(RunStatsType),
+    dump_run_statistics(),
 
     [ok = file:close(F) || {{csv_file, _}, F} <- erlang:get()],
     ok = file:close(SummaryFile),
@@ -189,15 +188,13 @@ measurement_csv_file({Label, _Op}) ->
 
 
 
-dump_run_statistics(RunStatsType) ->
-    Lines = stringify_stats(RunStatsType, erlang:get(run_metrics)),
+dump_run_statistics() ->
+    Lines = stringify_stats(erlang:get(run_metrics)),
     TestDir = basho_bench:get_test_dir(),
-    FileName = filename:join([TestDir, "run_statistics." ++ atom_to_list(RunStatsType)]),
+    FileName = filename:join([TestDir, "run_statistics.csv"]),
     write_run_statistics(FileName, Lines).
 
-stringify_stats(_RunStatsType=json, RunMetrics) ->
-    [ jiffy:encode( {[{recordedMetrics, {RunMetrics}}]}, [pretty] ) ];
-stringify_stats(_RunStatsType=csv, RunMetrics) ->
+stringify_stats(RunMetrics) ->
     % Ordered output of fields
     OrderedFields = [n, ops, mean, geometric_mean, harmonic_mean,
         variance, standard_deviation, skewness, kurtosis,
