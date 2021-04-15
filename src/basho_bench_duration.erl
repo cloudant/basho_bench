@@ -10,7 +10,8 @@
 
 -export([
     run/0,
-    remaining/0
+    remaining/0,
+    abort/1
 ]).
 
 -export([start_link/0]).
@@ -42,6 +43,10 @@ run() ->
 
 remaining() ->
     gen_server:call(?MODULE, remaining).
+
+
+abort(Reason) ->
+    gen_server:cast(?MODULE, {abort, Reason}).
 
 
 start_link() ->
@@ -84,6 +89,9 @@ handle_cast({worker_stopping, WorkerPid}, State) ->
             maybe_end({noreply, State}) 
     end;
 
+handle_cast({abort, Reason}, State) ->
+    {stop, {abort, Reason}, State};
+
 handle_cast(_Msg, State) ->
     maybe_end({noreply, State}).
 
@@ -105,13 +113,19 @@ handle_info(Msg, State) ->
 
 
 terminate(Reason, #state{duration=DurationMins}) ->
-    case Reason of
+    Abort = case Reason of
         normal ->
-            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
+            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]),
+            false;
         {shutdown, normal} ->
-            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]);
-        {shutdown, Reason} ->
-            ?CONSOLE("Test stopped: ~p\n", [Reason])
+            ?CONSOLE("Test completed after ~p mins.\n", [DurationMins]),
+            false;
+        {shutdown, Reason1} ->
+            ?CONSOLE("Test stopped: ~p\n", [Reason1]),
+            false;
+        {abort, Reason1} ->
+            ?CONSOLE("!! Test aborted: ~p\n", [Reason1]),
+            true
     end,
     case whereis(basho_bench_worker_sup) of
         undefined ->
@@ -126,6 +140,11 @@ terminate(Reason, #state{duration=DurationMins}) ->
     end,
     run_hook(basho_bench_config:get(post_hook, no_op)),
     basho_bench_profiler:maybe_terminate_profiler(basho_bench_config:get(enable_profiler, false)),
+    if Abort =/= true -> ok; true ->
+           ?CONSOLE("Aborting benchmark run...", []),
+           timer:sleep(1000),
+           erlang:halt(1)
+    end,
     supervisor:terminate_child(basho_bench_sup, basho_bench_run_sup),
     application:set_env(basho_bench_app, is_running, false),
     application:stop(basho_bench),

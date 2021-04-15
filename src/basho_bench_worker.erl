@@ -334,6 +334,13 @@ worker_next_op(State) ->
                     crash
             end;
 
+        {abort, Reason} ->
+            %% Driver signaling stop the world event has occurred.
+            %% Abort immediately.
+            ?INFO("Driver ~p (~p) has requested abort: ~p\n", [State#state.driver, self(), Reason]),
+            basho_bench_duration:abort(Reason),
+            normal;
+
         {stop, Reason} ->
             %% Driver (or something within it) has requested that this worker
             %% terminate cleanly.
