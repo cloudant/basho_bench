@@ -210,7 +210,7 @@ maybe_add_rampup(State) ->
     end.
 
 add_worker() ->
-    case basho_bench_config:get(workers, undefined) of
+    case basho_bench_config:get(workers_rampup, undefined) of
         undefined ->
             basho_bench_worker_sup:add_worker();
         [_|_] = Workers ->
