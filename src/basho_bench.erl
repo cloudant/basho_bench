@@ -221,16 +221,17 @@ test_dir(Opts, Name) ->
     ResultsDirAbs = filename:absname(ResultsDir),
     TestDir = filename:join([ResultsDirAbs, Name]),
     {ok, TestDir} = {filelib:ensure_dir(filename:join(TestDir, "foobar")), TestDir},
-    Link = filename:join([ResultsDir, "current"]),
-    [] = os:cmd(?FMT("rm -f ~s; ln -sf ~s ~s", [Link, TestDir, Link])),
+    %%Link = filename:join([ResultsDir, "current"]),
+    %%[] = os:cmd(?FMT("rm -f ~s; ln -sf ~s ~s", [Link, TestDir, Link])),
     TestDir.
 
 %%
 %% Construct a string suitable for use as a unique ID for this test run
 %%
 id() ->
-    {{Y, M, D}, {H, Min, S}} = calendar:local_time(),
-    ?FMT("~w~2..0w~2..0w_~2..0w~2..0w~2..0w", [Y, M, D, H, Min, S]).
+    %%{{Y, M, D}, {H, Min, S}} = calendar:local_time(),
+    %%?FMT("~w~2..0w~2..0w_~2..0w~2..0w~2..0w", [Y, M, D, H, Min, S]).
+    ok.
 
 add_code_paths([]) ->
     ok;
