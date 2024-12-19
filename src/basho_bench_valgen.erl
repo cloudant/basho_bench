@@ -50,6 +50,10 @@ new({uniform_bin, MinSize, MaxSize}, Id)
     Source = init_source(Id),
     Diff = MaxSize - MinSize,
     fun() -> data_block(Source, MinSize + rand:uniform(Diff)) end;
+new({function, Module, Function, {function, _, _, _}=InputGen}, Id)
+  when is_atom(Module), is_atom(Function) ->
+    Gen = new(InputGen, Id),
+    new({function, Module, Function, [Gen]}, Id);
 new({function, Module, Function, Args}, Id)
   when is_atom(Module), is_atom(Function), is_list(Args) ->
     case code:ensure_loaded(Module) of
