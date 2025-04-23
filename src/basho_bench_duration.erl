@@ -213,6 +213,8 @@ add_worker() ->
     case basho_bench_config:get(workers_rampup, undefined) of
         undefined ->
             basho_bench_worker_sup:add_worker();
+        Interval when is_integer(Interval) ->
+            basho_bench_worker_sup:add_worker();
         [_|_] = Workers ->
             WorkerTypes = [WT || {WT, _C} <- Workers],
             basho_bench_worker_sup:add_workers(WorkerTypes)
